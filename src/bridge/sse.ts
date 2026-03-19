@@ -1,3 +1,14 @@
+/**
+ * SSEClient — Server-Sent Events client using the Fetch API.
+ *
+ * Uses ReadableStream to parse the SSE text/event-stream format,
+ * with heartbeat detection to auto-disconnect on stale connections.
+ *
+ * The server sends periodic `:heartbeat` comments to keep the
+ * connection alive. If no data arrives within the heartbeat window,
+ * the client assumes the connection is dead and triggers onDisconnect.
+ */
+
 export interface SSEEvent {
   event: string;
   data: string;
@@ -5,6 +16,14 @@ export interface SSEEvent {
 
 type EventHandler = (event: SSEEvent) => void;
 type ErrorHandler = (error: Error) => void;
+
+/** Default heartbeat timeout in milliseconds (35 seconds). */
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 35_000;
+
+export interface SSEClientOptions {
+  /** Heartbeat timeout in ms. If no data arrives within this window, disconnect. */
+  heartbeatTimeoutMs?: number;
+}
 
 export class SSEClient {
   private url: string;
@@ -15,6 +34,7 @@ export class SSEClient {
   private onError: ErrorHandler;
   private onDisconnect: () => void;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimeoutMs: number;
   private running = false;
 
   constructor(
@@ -23,14 +43,17 @@ export class SSEClient {
     onEvent: EventHandler,
     onError: ErrorHandler,
     onDisconnect: () => void,
+    options: SSEClientOptions = {},
   ) {
     this.url = url;
     this.token = token;
     this.onEvent = onEvent;
     this.onError = onError;
     this.onDisconnect = onDisconnect;
+    this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
   }
 
+  /** Open the SSE stream. Throws if the initial HTTP request fails. */
   async connect(): Promise<void> {
     this.running = true;
     this.abortController = new AbortController();
@@ -53,6 +76,7 @@ export class SSEClient {
     this.readLoop();
   }
 
+  /** Cleanly close the SSE stream. Safe to call multiple times. */
   disconnect(): void {
     this.running = false;
     this.clearHeartbeatTimer();
@@ -60,6 +84,10 @@ export class SSEClient {
     this.reader?.cancel().catch(() => {});
     this.reader = null;
   }
+
+  // ---------------------------------------------------------------------------
+  // Heartbeat
+  // ---------------------------------------------------------------------------
 
   private resetHeartbeatTimer(): void {
     this.clearHeartbeatTimer();
@@ -69,7 +97,7 @@ export class SSEClient {
         this.disconnect();
         this.onDisconnect();
       }
-    }, 35000);
+    }, this.heartbeatTimeoutMs);
   }
 
   private clearHeartbeatTimer(): void {
@@ -78,6 +106,10 @@ export class SSEClient {
       this.heartbeatTimer = null;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Read loop
+  // ---------------------------------------------------------------------------
 
   private async readLoop(): Promise<void> {
     const decoder = new TextDecoder();
@@ -91,10 +123,10 @@ export class SSEClient {
         buffer += decoder.decode(value, { stream: true });
         this.resetHeartbeatTimer();
 
-        const events = this.parseBuffer(buffer);
-        buffer = events.remaining;
+        const { parsed, remaining } = parseSSEBuffer(buffer);
+        buffer = remaining;
 
-        for (const evt of events.parsed) {
+        for (const evt of parsed) {
           this.onEvent(evt);
         }
       }
@@ -108,37 +140,53 @@ export class SSEClient {
       }
     }
   }
+}
 
-  private parseBuffer(buffer: string): { parsed: SSEEvent[]; remaining: string } {
-    const parsed: SSEEvent[] = [];
-    const blocks = buffer.split('\n\n');
+// ---------------------------------------------------------------------------
+// SSE parser (pure function, exported for testability)
+// ---------------------------------------------------------------------------
 
-    // Last block may be incomplete
-    const remaining = blocks.pop() || '';
+/**
+ * Parse an SSE text buffer into discrete events.
+ *
+ * SSE format: events are separated by blank lines (`\n\n`).
+ * Each event block contains `event:` and `data:` lines.
+ * Lines starting with `:` are comments (e.g. heartbeats).
+ *
+ * Returns the parsed events and any incomplete trailing data.
+ */
+export function parseSSEBuffer(buffer: string): {
+  parsed: SSEEvent[];
+  remaining: string;
+} {
+  const parsed: SSEEvent[] = [];
+  const blocks = buffer.split('\n\n');
 
-    for (const block of blocks) {
-      if (!block.trim()) continue;
+  // Last block may be incomplete — keep it for next iteration
+  const remaining = blocks.pop() || '';
 
-      let eventType = '';
-      let data = '';
+  for (const block of blocks) {
+    if (!block.trim()) continue;
 
-      for (const line of block.split('\n')) {
-        if (line.startsWith(':')) {
-          // Comment (heartbeat) — ignore
-          continue;
-        }
-        if (line.startsWith('event:')) {
-          eventType = line.slice(6).trim();
-        } else if (line.startsWith('data:')) {
-          data += (data ? '\n' : '') + line.slice(5).trim();
-        }
+    let eventType = '';
+    let data = '';
+
+    for (const line of block.split('\n')) {
+      if (line.startsWith(':')) {
+        // Comment (heartbeat) — ignore
+        continue;
       }
-
-      if (eventType && data) {
-        parsed.push({ event: eventType, data });
+      if (line.startsWith('event:')) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        data += (data ? '\n' : '') + line.slice(5).trim();
       }
     }
 
-    return { parsed, remaining };
+    if (eventType && data) {
+      parsed.push({ event: eventType, data });
+    }
   }
+
+  return { parsed, remaining };
 }

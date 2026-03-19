@@ -1,151 +1,189 @@
+/**
+ * REST API client for the ECA remote server.
+ *
+ * Every public method corresponds to one REST endpoint.
+ * All methods throw on non-OK responses (except 409 on idempotent
+ * operations like stop/approve/reject where the action already happened).
+ */
+
+import type {
+  ChatSummary,
+  HealthResponse,
+  RemoteChat,
+  SendPromptBody,
+  SendPromptResponse,
+  SessionResponse,
+} from './types';
+import { resolveBaseUrl } from './utils';
+
 export class EcaRemoteApi {
   private baseUrl: string;
   private token: string;
 
   constructor(host: string, token: string) {
-    const protocol = host.startsWith('localhost') || host.startsWith('127.0.0.1')
-      ? 'http' : 'https';
-    this.baseUrl = `${protocol}://${host}/api/v1`;
+    this.baseUrl = resolveBaseUrl(host);
     this.token = token;
   }
 
+  // ---------------------------------------------------------------------------
+  // Core HTTP helpers
+  // ---------------------------------------------------------------------------
+
+  /** Build auth + optional JSON content-type headers. */
   private headers(json = false): HeadersInit {
     const h: HeadersInit = { 'Authorization': `Bearer ${this.token}` };
     if (json) h['Content-Type'] = 'application/json';
     return h;
   }
 
-  async health(): Promise<{ status: string; version: string }> {
-    const res = await fetch(`${this.baseUrl}/health`);
-    if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-    return res.json();
-  }
+  /**
+   * Generic fetch-check-parse helper.
+   * - Adds auth headers automatically.
+   * - Throws an `Error` when the response status is not OK,
+   *   unless `allowStatus` includes that specific code.
+   * - Returns `undefined` for 204 No Content or void endpoints.
+   */
+  private async request<T = void>(
+    path: string,
+    options: {
+      method?: string;
+      body?: unknown;
+      auth?: boolean;
+      /** HTTP status codes that should NOT throw (e.g. 409 for idempotent ops). */
+      allowStatus?: number[];
+    } = {},
+  ): Promise<T> {
+    const { method = 'GET', body, auth = true, allowStatus = [] } = options;
+    const hasBody = body !== undefined;
 
-  async session(): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/session`, { headers: this.headers() });
-    if (!res.ok) throw new Error(`Session fetch failed: ${res.status}`);
-    return res.json();
-  }
-
-  async chats(): Promise<any[]> {
-    const res = await fetch(`${this.baseUrl}/chats`, { headers: this.headers() });
-    if (!res.ok) throw new Error(`Chats fetch failed: ${res.status}`);
-    return res.json();
-  }
-
-  async getChat(chatId: string): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}`, { headers: this.headers() });
-    if (!res.ok) throw new Error(`Get chat failed: ${res.status}`);
-    return res.json();
-  }
-
-  async sendPrompt(chatId: string, body: {
-    message: string;
-    model?: string;
-    agent?: string;
-    variant?: string;
-    trust?: boolean;
-    contexts?: any[];
-  }): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/prompt`, {
-      method: 'POST',
-      headers: this.headers(true),
-      body: JSON.stringify(body),
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: auth ? this.headers(hasBody) : (hasBody ? { 'Content-Type': 'application/json' } : undefined),
+      ...(hasBody ? { body: JSON.stringify(body) } : {}),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `Prompt failed: ${res.status}`);
+
+    if (!res.ok && !allowStatus.includes(res.status)) {
+      // Try to extract a structured error message from the body
+      const errBody = await res.json().catch(() => null);
+      const message = errBody?.error?.message || `${method} ${path} failed: ${res.status}`;
+      throw new Error(message);
     }
-    return res.json();
+
+    // Return parsed JSON for responses that have a body
+    const text = await res.text();
+    if (text) return JSON.parse(text) as T;
+    return undefined as unknown as T;
   }
 
+  // ---------------------------------------------------------------------------
+  // Endpoints
+  // ---------------------------------------------------------------------------
+
+  /** Health check — unauthenticated, used to test reachability. */
+  async health(): Promise<HealthResponse> {
+    return this.request<HealthResponse>('/health', { auth: false });
+  }
+
+  /** Get the current session state (workspace, config, models, etc.). */
+  async session(): Promise<SessionResponse> {
+    return this.request<SessionResponse>('/session');
+  }
+
+  /** List all chat summaries. */
+  async chats(): Promise<ChatSummary[]> {
+    return this.request<ChatSummary[]>('/chats');
+  }
+
+  /** Get a single chat with full message history. */
+  async getChat(chatId: string): Promise<RemoteChat> {
+    return this.request<RemoteChat>(`/chats/${chatId}`);
+  }
+
+  /** Send a user prompt to a chat (creates the chat if it doesn't exist). */
+  async sendPrompt(chatId: string, body: SendPromptBody): Promise<SendPromptResponse> {
+    return this.request<SendPromptResponse>(`/chats/${chatId}/prompt`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  /** Stop an in-progress prompt. Ignores 409 (already stopped). */
   async stopPrompt(chatId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/stop`, {
+    return this.request(`/chats/${chatId}/stop`, {
       method: 'POST',
-      headers: this.headers(),
+      allowStatus: [409],
     });
-    if (!res.ok && res.status !== 409) {
-      throw new Error(`Stop failed: ${res.status}`);
-    }
   }
 
+  /** Approve a pending tool call. Ignores 409 (already handled). */
   async approveToolCall(chatId: string, toolCallId: string, save?: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/approve/${toolCallId}`, {
+    return this.request(`/chats/${chatId}/approve/${toolCallId}`, {
       method: 'POST',
-      headers: this.headers(!!save),
-      ...(save ? { body: JSON.stringify({ save }) } : {}),
+      body: save ? { save } : undefined,
+      allowStatus: [409],
     });
-    if (!res.ok && res.status !== 409) {
-      throw new Error(`Approve failed: ${res.status}`);
-    }
   }
 
+  /** Reject a pending tool call. Ignores 409 (already handled). */
   async rejectToolCall(chatId: string, toolCallId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/reject/${toolCallId}`, {
+    return this.request(`/chats/${chatId}/reject/${toolCallId}`, {
       method: 'POST',
-      headers: this.headers(),
+      allowStatus: [409],
     });
-    if (!res.ok && res.status !== 409) {
-      throw new Error(`Reject failed: ${res.status}`);
-    }
   }
 
+  /** Roll back a chat to a specific content ID. */
   async rollbackChat(chatId: string, contentId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/rollback`, {
+    return this.request(`/chats/${chatId}/rollback`, {
       method: 'POST',
-      headers: this.headers(true),
-      body: JSON.stringify({ contentId }),
+      body: { contentId },
     });
-    if (!res.ok) throw new Error(`Rollback failed: ${res.status}`);
   }
 
+  /** Clear all messages in a chat. */
   async clearChat(chatId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/clear`, {
-      method: 'POST',
-      headers: this.headers(),
-    });
-    if (!res.ok) throw new Error(`Clear failed: ${res.status}`);
+    return this.request(`/chats/${chatId}/clear`, { method: 'POST' });
   }
 
+  /** Delete a chat entirely. */
   async deleteChat(chatId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}`, {
-      method: 'DELETE',
-      headers: this.headers(),
-    });
-    if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+    return this.request(`/chats/${chatId}`, { method: 'DELETE' });
   }
 
+  /** Change the model for a chat. */
   async changeModel(chatId: string, model: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/model`, {
+    return this.request(`/chats/${chatId}/model`, {
       method: 'POST',
-      headers: this.headers(true),
-      body: JSON.stringify({ model }),
+      body: { model },
     });
-    if (!res.ok) throw new Error(`Change model failed: ${res.status}`);
   }
 
+  /** Change the agent for a chat. */
   async changeAgent(chatId: string, agent: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/agent`, {
+    return this.request(`/chats/${chatId}/agent`, {
       method: 'POST',
-      headers: this.headers(true),
-      body: JSON.stringify({ agent }),
+      body: { agent },
     });
-    if (!res.ok) throw new Error(`Change agent failed: ${res.status}`);
   }
 
+  /** Change the reasoning variant for a chat. */
   async changeVariant(chatId: string, variant: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/chats/${chatId}/variant`, {
+    return this.request(`/chats/${chatId}/variant`, {
       method: 'POST',
-      headers: this.headers(true),
-      body: JSON.stringify({ variant }),
+      body: { variant },
     });
-    if (!res.ok) throw new Error(`Change variant failed: ${res.status}`);
   }
 
+  // ---------------------------------------------------------------------------
+  // SSE
+  // ---------------------------------------------------------------------------
+
+  /** The URL for the SSE event stream. */
   sseUrl(): string {
     return `${this.baseUrl}/events`;
   }
 
+  /** The auth token (needed by SSEClient to authenticate the stream). */
   get authToken(): string {
     return this.token;
   }

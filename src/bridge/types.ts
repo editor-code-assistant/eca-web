@@ -1,0 +1,275 @@
+/**
+ * TypeScript types for the bridge layer.
+ *
+ * These types cover:
+ * - REST API request/response shapes
+ * - SSE event payloads
+ * - Session state managed by WebBridge
+ * - Outbound message types (webview → bridge)
+ *
+ * For webview-internal types (ChatContent, ToolCallDetails, etc.)
+ * see `eca-webview/src/protocol.ts`.
+ */
+
+import type {
+  ChatContext as _ChatContext,
+  ChatContentReceivedParams as _ChatContentReceivedParams,
+  MCPServerUpdatedParams as _MCPServerUpdatedParams,
+  WorkspaceFolder as _WorkspaceFolder,
+} from '@webview/protocol';
+
+// Re-export webview types used across the bridge layer,
+// so consumers import from one place instead of reaching into @webview.
+export type ChatContext = _ChatContext;
+export type ChatContentReceivedParams = _ChatContentReceivedParams;
+export type MCPServerUpdatedParams = _MCPServerUpdatedParams;
+export type WorkspaceFolder = _WorkspaceFolder;
+
+// ---------------------------------------------------------------------------
+// REST API response types
+// ---------------------------------------------------------------------------
+
+/** GET /api/v1/health */
+export interface HealthResponse {
+  status: string;
+  version: string;
+}
+
+/** GET /api/v1/session (partial — fields used by the bridge) */
+export interface SessionResponse {
+  workspaceFolders?: WorkspaceFolder[];
+  models?: ModelInfo[];
+  agents?: AgentInfo[];
+  mcpServers?: MCPServerUpdatedParams[];
+  chats?: RemoteChat[];
+  welcomeMessage?: string;
+  variants?: string[];
+  selectedVariant?: string | null;
+}
+
+export interface ModelInfo {
+  id: string;
+  [key: string]: unknown;
+}
+
+export interface AgentInfo {
+  id: string;
+  [key: string]: unknown;
+}
+
+/** GET /api/v1/chats — list summary */
+export interface ChatSummary {
+  id: string;
+  title?: string;
+  status?: 'idle' | 'running';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** GET /api/v1/chats/:id — full chat detail */
+export interface RemoteChat {
+  id: string;
+  title?: string;
+  status?: 'idle' | 'running';
+  messages?: StoredMessage[];
+}
+
+/** POST /api/v1/chats/:id/prompt — request body */
+export interface SendPromptBody {
+  message: string;
+  model?: string;
+  agent?: string;
+  variant?: string;
+  trust?: boolean;
+  contexts?: ChatContext[];
+}
+
+/** POST /api/v1/chats/:id/prompt — response */
+export interface SendPromptResponse {
+  chatId: string;
+  model?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Stored message types (LLM conversation format from the server)
+// ---------------------------------------------------------------------------
+
+export type StoredMessageRole =
+  | 'user'
+  | 'assistant'
+  | 'tool_call'
+  | 'tool_call_output'
+  | 'reason'
+  | 'server_tool_use'
+  | 'server_tool_result';
+
+export interface StoredMessage {
+  role: StoredMessageRole;
+  content: unknown;
+  contentId?: string;
+}
+
+export interface StoredTextContent {
+  type: 'text';
+  text: string;
+}
+
+export interface StoredToolCallContent {
+  id: string;
+  name?: string;
+  fullName?: string;
+  arguments?: string | Record<string, unknown>;
+  origin?: string;
+  summary?: string;
+  details?: unknown;
+  server?: string;
+}
+
+export interface StoredToolCallOutputContent {
+  id: string;
+  name?: string;
+  fullName?: string;
+  output?: {
+    error?: boolean;
+    contents?: Array<{ type: string; text: string }>;
+  };
+  totalTimeMs?: number;
+  details?: unknown;
+  summary?: string;
+  server?: string;
+}
+
+export interface StoredReasonContent {
+  id: string;
+  text?: string;
+  totalTimeMs?: number;
+}
+
+// ---------------------------------------------------------------------------
+// SSE event types
+// ---------------------------------------------------------------------------
+
+/** Discriminated union of all known SSE event types from the server. */
+export type SSEEventType =
+  | 'session:connected'
+  | 'session:message'
+  | 'session:disconnecting'
+  | 'chat:content-received'
+  | 'chat:cleared'
+  | 'chat:deleted'
+  | 'chat:status-changed'
+  | 'config:updated'
+  | 'tool:server-updated';
+
+export interface SSESessionConnectedPayload {
+  workspaceFolders?: WorkspaceFolder[];
+  models?: ModelInfo[];
+  agents?: AgentInfo[];
+  mcpServers?: MCPServerUpdatedParams[];
+  chats?: RemoteChat[];
+  welcomeMessage?: string;
+  variants?: string[];
+  selectedVariant?: string | null;
+}
+
+export interface SSEChatStatusPayload {
+  chatId: string;
+  status: 'idle' | 'running';
+}
+
+export interface SSESessionMessagePayload {
+  type: 'info' | 'warn' | 'error';
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
+// Session state (held by WebBridge after connection)
+// ---------------------------------------------------------------------------
+
+export interface SessionState {
+  workspaceFolders?: WorkspaceFolder[];
+  models?: ModelInfo[];
+  agents?: AgentInfo[];
+  mcpServers?: MCPServerUpdatedParams[];
+  chats?: RemoteChat[];
+  config?: SessionConfig;
+}
+
+export interface SessionConfig {
+  chat: {
+    models: string[];
+    agents: string[];
+    welcomeMessage: string;
+    variants: string[];
+    selectedVariant: string | null;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Outbound messages (webview → bridge → REST)
+// ---------------------------------------------------------------------------
+
+/**
+ * Union of all outbound message types the webview can send.
+ * Used by handleOutbound() for type-safe routing.
+ */
+export type OutboundMessage =
+  | { type: 'webview/ready'; data: undefined }
+  | { type: 'chat/userPrompt'; data: UserPromptData }
+  | { type: 'chat/toolCallApprove'; data: { chatId: string; toolCallId: string; save?: string } }
+  | { type: 'chat/toolCallReject'; data: { chatId: string; toolCallId: string } }
+  | { type: 'chat/promptStop'; data: { chatId: string } }
+  | { type: 'chat/delete'; data: { chatId: string } }
+  | { type: 'chat/rollback'; data: { chatId: string; contentId: string } }
+  | { type: 'chat/clearChat'; data: { chatId: string } }
+  | { type: 'chat/selectedModelChanged'; data: { model: string } }
+  | { type: 'chat/selectedAgentChanged'; data: { agent: string } }
+  | { type: 'chat/selectedVariantChanged'; data: { variant: string } }
+  | { type: 'editor/openUrl'; data: { url: string } }
+  | { type: 'editor/openFile'; data: unknown }
+  | { type: 'editor/openGlobalConfig'; data: unknown }
+  | { type: 'editor/openServerLogs'; data: unknown }
+  | { type: 'editor/refresh'; data: unknown }
+  | { type: 'editor/readInput'; data: { requestId: string; message: string } }
+  | { type: 'editor/saveFile'; data: { content: string; defaultName?: string } }
+  | { type: 'editor/saveClipboardImage'; data: { requestId: string } }
+  | { type: 'chat/queryContext'; data: { chatId: string; query: string } }
+  | { type: 'chat/queryCommands'; data: { chatId: string; query: string } }
+  | { type: 'chat/queryFiles'; data: { chatId: string; query: string } }
+  | { type: 'mcp/startServer'; data: { name: string } }
+  | { type: 'mcp/stopServer'; data: { name: string } }
+  | { type: 'mcp/connectServer'; data: { name: string } }
+  | { type: 'mcp/logoutServer'; data: { name: string } }
+  | { type: 'mcp/updateServer'; data: { requestId?: string } };
+
+export interface UserPromptData {
+  chatId?: string;
+  prompt: string;
+  model?: string;
+  agent?: string;
+  variant?: string;
+  trust?: boolean;
+  contexts?: ChatContext[];
+}
+
+// ---------------------------------------------------------------------------
+// Webview dispatch types (bridge → webview via postMessage)
+// ---------------------------------------------------------------------------
+
+/**
+ * Known dispatch message types sent to the webview via window.postMessage.
+ * Matches the reducers in eca-webview/src/redux/slices/.
+ */
+export type DispatchType =
+  | 'server/statusChanged'
+  | 'server/setWorkspaceFolders'
+  | 'config/updated'
+  | 'tool/serversUpdated'
+  | 'chat/contentReceived'
+  | 'chat/cleared'
+  | 'chat/deleted'
+  | 'chat/queryContext'
+  | 'chat/queryCommands'
+  | 'chat/queryFiles'
+  | 'editor/readInput'
+  | 'editor/saveClipboardImage';
