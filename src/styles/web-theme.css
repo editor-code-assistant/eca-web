@@ -1,0 +1,63 @@
+/* ECA Web dark theme — maps ECA brand colors to webview CSS variables */
+html[data-editor="web"] {
+  --eca-editor-bg: #12121e;
+  --eca-editor-fg: #e0e4ea;
+
+  --eca-base-bg: #12121e;
+  --eca-fg: #e0e4ea;
+  --eca-accent-fg: #00a5b8;
+
+  --eca-panel-bg: #1a1a2e;
+  --eca-panel-border: #2a2a3e;
+
+  --eca-input-bg: #22223a;
+  --eca-input-fg: #e0e4ea;
+  --eca-input-placeholder-fg: #5a6a7a;
+
+  --eca-base-border: #2a2a3e;
+  --eca-base-hover: #2a2a3e;
+
+  --eca-link-fg: #00a5b8;
+
+  --eca-success-fg: #73c991;
+  --eca-warning-fg: #cca700;
+  --eca-error-fg: #f14c4c;
+
+  --eca-warning-message-fg: #cca700;
+  --eca-confirm-action-bg: #73c991;
+  --eca-confirm-action-fg: #f8f8f8;
+
+  --eca-diff-unchanged-bg: rgba(116, 116, 116, 0.16);
+  --eca-diff-insert-bg: rgba(156, 204, 44, 0.2);
+  --eca-diff-delete-bg: rgba(255, 0, 0, 0.2);
+
+  --eca-item-selectable-fg: #8a9ab0;
+
+  --eca-tooltip-bg: #1a1a2e;
+  --eca-tooltip-fg: #e0e4ea;
+
+  --eca-toggle-slider-bg: #5a6a7a;
+  --eca-toggle-icon-bg: #ffffff;
+  --eca-toggle-bg: #007a94;
+
+  --eca-button-primary-fg: #ffffff;
+  --eca-button-primary-bg: #007a94;
+  --eca-button-primary-border: rgba(255, 255, 255, 0.07);
+  --eca-button-primary-hover-bg: #00a5b8;
+  --eca-button-primary-active-bg: #004d5e;
+
+  --eca-button-secondary-fg: #e0e4ea;
+  --eca-button-secondary-bg: transparent;
+  --eca-button-secondary-border: #2a2a3e;
+  --eca-button-secondary-hover-bg: #22223a;
+  --eca-button-secondary-active-bg: #2a2a3e;
+
+  --eca-icon-font-family: codicon;
+
+  --eca-context-file-fg: #ee9d28;
+  --eca-context-directory-fg: #d18f52;
+  --eca-context-web-fg: #75beff;
+  --eca-context-repo-map-fg: #b180d7;
+  --eca-context-cursor-fg: #dcdcdc;
+  --eca-context-mcp-resource-fg: #23d18b;
+}
