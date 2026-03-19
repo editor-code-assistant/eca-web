@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { RemotePage } from './pages/RemotePage';
+import { App } from './App';
 import '@webview/index.css';
 import './styles/web-theme.css';
 
@@ -10,6 +10,6 @@ window.mediaUrl = '';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RemotePage />
+    <App />
   </React.StrictMode>,
 );

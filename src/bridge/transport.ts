@@ -25,6 +25,7 @@ export class WebBridge {
   private currentChatId: string | null = null;
   private outboundListener: ((e: Event) => void) | null = null;
   private mcpServers: any[] = [];
+  private restoring = false;
 
   constructor(host: string, token: string) {
     this.api = new EcaRemoteApi(host, token);
@@ -103,49 +104,78 @@ export class WebBridge {
   private async dispatchInitialState(): Promise<void> {
     if (!this.sessionState) return;
 
-    this.dispatch('server/statusChanged', 'Running');
+    this.restoring = true;
+    try {
+      this.dispatch('server/statusChanged', 'Running');
 
-    if (this.sessionState.workspaceFolders) {
-      this.dispatch('server/setWorkspaceFolders', this.sessionState.workspaceFolders);
-    }
+      if (this.sessionState.workspaceFolders) {
+        this.dispatch('server/setWorkspaceFolders', this.sessionState.workspaceFolders);
+      }
 
-    if (this.sessionState.config) {
-      this.dispatch('config/updated', this.sessionState.config);
-    }
+      if (this.sessionState.config) {
+        this.dispatch('config/updated', this.sessionState.config);
+      }
 
-    if (this.sessionState.mcpServers) {
-      this.mcpServers = [...this.sessionState.mcpServers];
-      this.dispatch('tool/serversUpdated', this.mcpServers);
-    }
+      if (this.sessionState.mcpServers) {
+        this.mcpServers = [...this.sessionState.mcpServers];
+        this.dispatch('tool/serversUpdated', this.mcpServers);
+      }
 
-    // Restore existing chats from the server
-    if (this.sessionState.chats && this.sessionState.chats.length > 0) {
-      await this.restoreChats(this.sessionState.chats);
+      // Restore chats — prefer session:connected data, fall back to REST
+      let chats = this.sessionState.chats;
+      if (chats && chats.length > 0) {
+        console.log(`[Bridge] Restoring ${chats.length} chat(s) from session:connected`);
+        await this.restoreChats(chats);
+      } else {
+        // Fallback: fetch from REST API
+        try {
+          const chatSummaries = await this.api.chats();
+          console.log(`[Bridge] Fetched ${chatSummaries?.length ?? 0} chat(s) from REST API`);
+          if (chatSummaries && chatSummaries.length > 0) {
+            await this.restoreChatsFromSummaries(chatSummaries);
+          }
+        } catch (err) {
+          console.error('[Bridge] Failed to fetch chat list:', err);
+        }
+      }
+    } finally {
+      this.restoring = false;
     }
   }
 
   /**
-   * Fetch full chat details and replay messages to restore chat history.
+   * Restore chats from full chat objects (e.g. from session:connected).
+   * Messages are in LLM conversation format; we transform them into the
+   * fine-grained event format the webview reducer expects.
    */
-  private async restoreChats(chatSummaries: any[]): Promise<void> {
-    for (const summary of chatSummaries) {
+  private async restoreChats(chats: any[]): Promise<void> {
+    for (const chat of chats) {
       try {
-        const chat = await this.api.getChat(summary.id);
-        if (!chat || !chat.messages) continue;
+        if (!chat?.id) continue;
 
-        // Track the most recent chat for model/agent changes
         this.currentChatId = chat.id;
 
-        // Replay each message as a content-received event
-        for (const msg of chat.messages) {
+        // Replay stored messages as webview events
+        if (chat.messages && chat.messages.length > 0) {
+          console.log(`[Bridge] Restoring chat ${chat.id}: ${chat.messages.length} message(s)`);
+          for (const msg of chat.messages) {
+            const events = this.storedMessageToEvents(chat.id, msg);
+            for (const event of events) {
+              this.dispatch('chat/contentReceived', event);
+            }
+          }
+        }
+
+        // Restore chat title
+        if (chat.title) {
           this.dispatch('chat/contentReceived', {
             chatId: chat.id,
-            role: msg.role,
-            content: msg.content,
+            role: 'system',
+            content: { type: 'metadata', title: chat.title },
           });
         }
 
-        // If the chat has a status, dispatch it
+        // If the chat is running, show progress indicator
         if (chat.status === 'running') {
           this.dispatch('chat/contentReceived', {
             chatId: chat.id,
@@ -154,9 +184,151 @@ export class WebBridge {
           });
         }
       } catch (err) {
-        console.error(`[Bridge] Failed to restore chat ${summary.id}:`, err);
+        console.error(`[Bridge] Failed to restore chat ${chat.id}:`, err);
       }
     }
+  }
+
+  /**
+   * Fallback: restore chats by fetching full details from REST API.
+   */
+  private async restoreChatsFromSummaries(summaries: any[]): Promise<void> {
+    const fullChats: any[] = [];
+    for (const summary of summaries) {
+      try {
+        const chat = await this.api.getChat(summary.id);
+        if (chat) fullChats.push(chat);
+      } catch (err) {
+        console.error(`[Bridge] Failed to fetch chat ${summary.id}:`, err);
+      }
+    }
+    if (fullChats.length > 0) {
+      await this.restoreChats(fullChats);
+    }
+  }
+
+  /**
+   * Transform a stored server message (LLM conversation format) into
+   * webview contentReceived event(s) (fine-grained event format).
+   *
+   * Stored roles:
+   *   user/assistant → content is an array of items [{type, text}, ...]
+   *   tool_call      → content is a single object {id, name, arguments, ...}
+   *   tool_call_output → content is a single object {id, output, error, ...}
+   *   reason         → content is a single object {id, text, totalTimeMs}
+   *   server_tool_use/server_tool_result → internal LLM format, skipped
+   */
+  private storedMessageToEvents(chatId: string, msg: any): any[] {
+    const events: any[] = [];
+
+    switch (msg.role) {
+      case 'user': {
+        const contents = Array.isArray(msg.content) ? msg.content : [msg.content];
+        for (const item of contents) {
+          if (item.type === 'text') {
+            events.push({
+              chatId,
+              role: 'user',
+              content: {
+                type: 'text',
+                text: item.text,
+                ...(msg.contentId ? { contentId: msg.contentId } : {}),
+              },
+            });
+          }
+        }
+        break;
+      }
+
+      case 'assistant': {
+        const contents = Array.isArray(msg.content) ? msg.content : [msg.content];
+        for (const item of contents) {
+          if (item.type === 'text') {
+            events.push({
+              chatId,
+              role: 'assistant',
+              content: { type: 'text', text: item.text },
+            });
+          }
+        }
+        break;
+      }
+
+      case 'tool_call': {
+        const tc = msg.content;
+        events.push({
+          chatId,
+          role: 'assistant',
+          content: {
+            type: 'toolCallPrepare',
+            id: tc.id,
+            name: tc.name || tc.fullName,
+            argumentsText: typeof tc.arguments === 'string'
+              ? tc.arguments
+              : JSON.stringify(tc.arguments, null, 2),
+            origin: tc.origin || 'native',
+            manualApproval: false,
+            summary: tc.summary,
+            details: tc.details,
+            server: tc.server,
+          },
+        });
+        break;
+      }
+
+      case 'tool_call_output': {
+        const tco = msg.content;
+        events.push({
+          chatId,
+          role: 'assistant',
+          content: {
+            type: 'toolCalled',
+            id: tco.id,
+            name: tco.name || tco.fullName,
+            error: tco.output?.error || false,
+            outputs: tco.output?.contents || [],
+            totalTimeMs: tco.totalTimeMs,
+            details: tco.details,
+            summary: tco.summary,
+            server: tco.server,
+          },
+        });
+        break;
+      }
+
+      case 'reason': {
+        const r = msg.content;
+        events.push({
+          chatId,
+          role: 'assistant',
+          content: { type: 'reasonStarted', id: r.id },
+        });
+        if (r.text) {
+          events.push({
+            chatId,
+            role: 'assistant',
+            content: { type: 'reasonText', id: r.id, text: r.text },
+          });
+        }
+        events.push({
+          chatId,
+          role: 'assistant',
+          content: { type: 'reasonFinished', id: r.id, totalTimeMs: r.totalTimeMs },
+        });
+        break;
+      }
+
+      // Server tool use/result are internal to the LLM conversation
+      // and don't have a direct webview representation
+      case 'server_tool_use':
+      case 'server_tool_result':
+        break;
+
+      default:
+        console.log(`[Bridge] Unknown message role during restore: ${msg.role}`);
+    }
+
+    return events;
   }
 
   // --- SSE Event Handling ---
@@ -186,6 +358,14 @@ export class WebBridge {
   }
 
   private handleSSEEvent(event: SSEEvent): void {
+    // During initial chat restore, skip live chat content events to prevent
+    // duplicates. The REST-fetched chat state already includes all messages
+    // up to the fetch point; any SSE events for the same content would be
+    // redundant. Events arriving after restore completes are processed normally.
+    if (this.restoring && event.event === 'chat:content-received') {
+      return;
+    }
+
     try {
       const data = JSON.parse(event.data);
 
@@ -409,13 +589,10 @@ export class WebBridge {
 
   /**
    * Get any known chat ID for session-wide operations.
-   * Falls back to the first chat from the session state.
+   * Falls back to the currentChatId set during restore.
    */
   private getAnyChatId(): string | null {
-    if (this.sessionState?.chats && this.sessionState.chats.length > 0) {
-      return this.sessionState.chats[0].id;
-    }
-    return null;
+    return this.currentChatId;
   }
 
   /** Dispatch a message to the webview via window.postMessage */
