@@ -161,7 +161,8 @@ export type SSEEventType =
   | 'chat:deleted'
   | 'chat:status-changed'
   | 'config:updated'
-  | 'tool:server-updated';
+  | 'tool:server-updated'
+  | 'trust:updated';
 
 export interface SSESessionConnectedPayload {
   workspaceFolders?: WorkspaceFolder[];
@@ -174,6 +175,11 @@ export interface SSESessionConnectedPayload {
   selectAgent?: string;
   variants?: string[];
   selectedVariant?: string | null;
+  trust?: boolean;
+}
+
+export interface SSETrustUpdatedPayload {
+  trust: boolean;
 }
 
 export interface SSEChatStatusPayload {
@@ -197,6 +203,7 @@ export interface SessionState {
   mcpServers?: MCPServerUpdatedParams[];
   chats?: RemoteChat[];
   config?: SessionConfig;
+  trust?: boolean;
 }
 
 export interface SessionConfig {
@@ -246,7 +253,8 @@ export type OutboundMessage =
   | { type: 'mcp/stopServer'; data: { name: string } }
   | { type: 'mcp/connectServer'; data: { name: string } }
   | { type: 'mcp/logoutServer'; data: { name: string } }
-  | { type: 'mcp/updateServer'; data: { requestId?: string } };
+  | { type: 'mcp/updateServer'; data: { requestId?: string } }
+  | { type: 'server/setTrust'; data: boolean };
 
 export interface UserPromptData {
   chatId?: string;
@@ -259,6 +267,20 @@ export interface UserPromptData {
 }
 
 // ---------------------------------------------------------------------------
+// Chat sidebar types (shell-level chat list for the sidebar)
+// ---------------------------------------------------------------------------
+
+/** Lightweight chat entry exposed to the React shell for the sidebar. */
+export interface ChatEntry {
+  id: string;
+  title: string;
+  status: 'idle' | 'running';
+}
+
+/** Callback signature for chat list change notifications. */
+export type ChatListChangeCallback = (chats: ChatEntry[], selectedChatId: string | null) => void;
+
+// ---------------------------------------------------------------------------
 // Webview dispatch types (bridge → webview via postMessage)
 // ---------------------------------------------------------------------------
 
@@ -269,6 +291,7 @@ export interface UserPromptData {
 export type DispatchType =
   | 'server/statusChanged'
   | 'server/setWorkspaceFolders'
+  | 'server/setTrust'
   | 'config/updated'
   | 'tool/serversUpdated'
   | 'chat/contentReceived'

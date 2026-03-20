@@ -87,3 +87,27 @@ html[data-editor="web"] {
 [data-editor="web"] .prompt-area .contexts {
   display: none;
 }
+
+/*
+ * Chat header visibility on web:
+ *  - Desktop: hide entirely (sidebar replaces the tab bar)
+ *  - Mobile: hide the tab row (.chats, .trust-toggle) but show the title bar
+ */
+@media (min-width: 768px) {
+  [data-editor="web"] .chat-header {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Hide the horizontal tab bar and trust toggle on mobile */
+  [data-editor="web"] .chat-header .chats,
+  [data-editor="web"] .chat-header .trust-toggle {
+    display: none;
+  }
+
+  /* Show the mobile title bar */
+  [data-editor="web"] .chat-header .web-chat-title-bar {
+    display: flex;
+  }
+}

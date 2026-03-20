@@ -12,6 +12,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { testConnection } from '../bridge/connection';
+import type { WebBridge } from '../bridge/transport';
+import type { ChatEntry } from '../bridge/types';
+import { ChatSidebar, ChatSidebarToggle } from '../components/ChatSidebar';
 import {
   consumeDeepLink,
   loadActiveId,
@@ -32,6 +35,10 @@ export function RemoteProduct() {
   const [showForm, setShowForm] = useState(false);
   const [formConnecting, setFormConnecting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [activeBridge, setActiveBridge] = useState<WebBridge | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
 
   // --- Persistence ---
 
@@ -53,6 +60,14 @@ export function RemoteProduct() {
       setActiveId(id);
       setShowForm(false);
     }
+  }, []);
+
+  // --- Listen for sidebar toggle from webview ---
+
+  useEffect(() => {
+    const handler = () => setSidebarOpen((prev) => !prev);
+    window.addEventListener('eca-toggle-sidebar', handler);
+    return () => window.removeEventListener('eca-toggle-sidebar', handler);
   }, []);
 
   // --- Guard stale activeId ---
@@ -111,10 +126,30 @@ export function RemoteProduct() {
     [],
   );
 
+  const handleBridgeChange = useCallback((bridge: WebBridge | null) => {
+    setActiveBridge(bridge);
+    if (bridge) {
+      bridge.onChatListChanged((entries, selected) => {
+        setChatEntries(entries);
+        setSelectedChatId(selected);
+      });
+      setChatEntries(bridge.getChatEntries());
+      setSelectedChatId(bridge.getSelectedChatId());
+    } else {
+      setChatEntries([]);
+      setSelectedChatId(null);
+    }
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => !prev);
+  }, []);
+
   // --- Render ---
 
   const activeEntry = entries.find((e) => e.id === activeId);
   const shouldShowForm = showForm || entries.length === 0 || !activeEntry;
+  const showSidebar = !shouldShowForm && activeBridge;
 
   return (
     <div className="remote-product">
@@ -125,26 +160,40 @@ export function RemoteProduct() {
           onSwitch={switchConnection}
           onRemove={removeConnection}
           onAdd={() => { setShowForm(true); setFormError(null); }}
+          leftSlot={showSidebar ? <ChatSidebarToggle onClick={toggleSidebar} /> : undefined}
         />
       )}
 
-      <div className="remote-product-content">
-        {shouldShowForm ? (
-          <ConnectForm
-            onConnect={addConnection}
-            isConnecting={formConnecting}
-            error={formError}
-          />
-        ) : (
-          <RemoteSession
-            key={activeEntry.id}
-            host={activeEntry.host}
-            token={activeEntry.token}
-            onStatusChange={(status, error) =>
-              handleStatusChange(activeEntry.id, status, error)
-            }
+      <div className="remote-product-body">
+        {showSidebar && (
+          <ChatSidebar
+            bridge={activeBridge}
+            chats={chatEntries}
+            selectedId={selectedChatId}
+            mobileOpen={sidebarOpen}
+            onMobileClose={() => setSidebarOpen(false)}
           />
         )}
+
+        <div className="remote-product-content">
+          {shouldShowForm ? (
+            <ConnectForm
+              onConnect={addConnection}
+              isConnecting={formConnecting}
+              error={formError}
+            />
+          ) : (
+            <RemoteSession
+              key={activeEntry.id}
+              host={activeEntry.host}
+              token={activeEntry.token}
+              onStatusChange={(status, error) =>
+                handleStatusChange(activeEntry.id, status, error)
+              }
+              onBridgeChange={handleBridgeChange}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

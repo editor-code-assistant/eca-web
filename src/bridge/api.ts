@@ -175,6 +175,42 @@ export class EcaRemoteApi {
   }
 
   // ---------------------------------------------------------------------------
+  // Trust
+  // ---------------------------------------------------------------------------
+
+  /** Set the trust mode on the server. */
+  async setTrust(trust: boolean): Promise<void> {
+    return this.request('/trust', {
+      method: 'POST',
+      body: { trust },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // MCP operations
+  // ---------------------------------------------------------------------------
+
+  /** Start an MCP server by name. */
+  async mcpStartServer(name: string): Promise<void> {
+    return this.request(`/mcp/${encodeURIComponent(name)}/start`, { method: 'POST' });
+  }
+
+  /** Stop an MCP server by name. */
+  async mcpStopServer(name: string): Promise<void> {
+    return this.request(`/mcp/${encodeURIComponent(name)}/stop`, { method: 'POST' });
+  }
+
+  /** Connect (reconnect) an MCP server by name. */
+  async mcpConnectServer(name: string): Promise<void> {
+    return this.request(`/mcp/${encodeURIComponent(name)}/connect`, { method: 'POST' });
+  }
+
+  /** Logout an MCP server by name. */
+  async mcpLogoutServer(name: string): Promise<void> {
+    return this.request(`/mcp/${encodeURIComponent(name)}/logout`, { method: 'POST' });
+  }
+
+  // ---------------------------------------------------------------------------
   // SSE
   // ---------------------------------------------------------------------------
 

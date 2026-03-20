@@ -6,11 +6,19 @@
   overflow: hidden;
 }
 
+/* Horizontal container: sidebar + content */
+.remote-product-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
 .remote-product-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 
 /* ---- Connection bar ---- */

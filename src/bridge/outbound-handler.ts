@@ -110,6 +110,10 @@ export async function handleOutbound(
         dispatch('editor/saveClipboardImage', { requestId: data.requestId, path: null });
         break;
 
+      case 'editor/toggleSidebar':
+        window.dispatchEvent(new CustomEvent('eca-toggle-sidebar'));
+        break;
+
       // --- Query operations (not available via REST — return empty) ---
       case 'chat/queryContext':
         dispatch('chat/queryContext', { chatId: data.chatId, contexts: [] });
@@ -123,16 +127,31 @@ export async function handleOutbound(
         dispatch('chat/queryFiles', { chatId: data.chatId, files: [] });
         break;
 
-      // --- MCP operations (not available in web) ---
+      // --- Trust mode ---
+      case 'server/setTrust':
+        await api.setTrust(data);
+        break;
+
+      // --- MCP operations ---
       case 'mcp/startServer':
+        await api.mcpStartServer(data.name);
+        break;
+
       case 'mcp/stopServer':
+        await api.mcpStopServer(data.name);
+        break;
+
       case 'mcp/connectServer':
+        await api.mcpConnectServer(data.name);
+        break;
+
       case 'mcp/logoutServer':
-        console.log(`[outbound] MCP operation not available in web: ${type}`);
+        await api.mcpLogoutServer(data.name);
         break;
 
       case 'mcp/updateServer':
         // Respond immediately to prevent webviewSendAndGet from hanging
+        // (no REST endpoint for updating MCP server config in web context)
         console.log(`[outbound] MCP update not available in web`);
         if (data.requestId) {
           dispatch('editor/readInput', { requestId: data.requestId, value: null });

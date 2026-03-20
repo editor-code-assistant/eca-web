@@ -9,9 +9,11 @@ interface RemoteSessionProps {
   host: string;
   token: string;
   onStatusChange: (status: SessionStatus, error?: string) => void;
+  /** Called when the bridge instance changes (connected or disconnected). */
+  onBridgeChange?: (bridge: WebBridge | null) => void;
 }
 
-export function RemoteSession({ host, token, onStatusChange }: RemoteSessionProps) {
+export function RemoteSession({ host, token, onStatusChange, onBridgeChange }: RemoteSessionProps) {
   const [state, setState] = useState<
     | { status: 'connecting' }
     | { status: 'connected' }
@@ -21,7 +23,9 @@ export function RemoteSession({ host, token, onStatusChange }: RemoteSessionProp
   const bridgeRef = useRef<WebBridge | null>(null);
   const mountedRef = useRef(true);
   const onStatusChangeRef = useRef(onStatusChange);
+  const onBridgeChangeRef = useRef(onBridgeChange);
   onStatusChangeRef.current = onStatusChange;
+  onBridgeChangeRef.current = onBridgeChange;
 
   const connect = useCallback(async () => {
     setState({ status: 'connecting' });
@@ -41,6 +45,7 @@ export function RemoteSession({ host, token, onStatusChange }: RemoteSessionProp
       }
       setState({ status: 'connected' });
       onStatusChangeRef.current('connected');
+      onBridgeChangeRef.current?.(bridge);
     } catch (err: any) {
       bridge.disconnect();
       if (!mountedRef.current) return;
@@ -48,6 +53,7 @@ export function RemoteSession({ host, token, onStatusChange }: RemoteSessionProp
       const message = err.message || 'Connection failed';
       setState({ status: 'error', message });
       onStatusChangeRef.current('error', message);
+      onBridgeChangeRef.current?.(null);
     }
   }, [host, token]);
 
@@ -59,6 +65,7 @@ export function RemoteSession({ host, token, onStatusChange }: RemoteSessionProp
       mountedRef.current = false;
       bridgeRef.current?.disconnect();
       bridgeRef.current = null;
+      onBridgeChangeRef.current?.(null);
     };
   }, [connect]);
 

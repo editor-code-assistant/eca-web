@@ -22,6 +22,8 @@ import { chatToRestoreEvents } from './chat-restore';
 import { handleOutbound, type OutboundContext } from './outbound-handler';
 import { SSEClient, type SSEEvent } from './sse';
 import type {
+  ChatEntry,
+  ChatListChangeCallback,
   MCPServerUpdatedParams,
   RemoteChat,
   SessionConfig,
@@ -29,6 +31,7 @@ import type {
   SSEChatStatusPayload,
   SSESessionConnectedPayload,
   SSESessionMessagePayload,
+  SSETrustUpdatedPayload,
 } from './types';
 
 /** Timeout for the initial SSE handshake (session:connected). */
@@ -42,6 +45,15 @@ export class WebBridge {
   private currentChatId: string | null = null;
   private outboundListener: ((e: Event) => void) | null = null;
   private mcpServers: MCPServerUpdatedParams[] = [];
+
+  /**
+   * Lightweight chat index exposed to the React shell for the sidebar.
+   * Kept in sync as chat events flow through the bridge.
+   */
+  private chatEntries: ChatEntry[] = [];
+
+  /** Callback invoked whenever the chat list or selection changes. */
+  private onChatListChange: ChatListChangeCallback | null = null;
 
   /**
    * True after `disconnect()` has been called. Checked after every async
@@ -99,6 +111,48 @@ export class WebBridge {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat list API (for the sidebar)
+  // ---------------------------------------------------------------------------
+
+  /** Register a listener for chat list changes (used by the sidebar). */
+  onChatListChanged(cb: ChatListChangeCallback): void {
+    this.onChatListChange = cb;
+    // Immediately fire with current state
+    cb([...this.chatEntries], this.currentChatId);
+  }
+
+  /** Get the current chat entries snapshot. */
+  getChatEntries(): ChatEntry[] {
+    return [...this.chatEntries];
+  }
+
+  /** Get the currently selected chat ID. */
+  getSelectedChatId(): string | null {
+    return this.currentChatId;
+  }
+
+  /** Select a chat by ID — dispatches to the webview and updates tracking. */
+  selectChat(chatId: string): void {
+    this.currentChatId = chatId;
+    this.dispatch('chat/selectChat', chatId);
+    this.notifyChatListChange();
+  }
+
+  /** Create a new chat — dispatches to the webview. */
+  newChat(): void {
+    this.dispatch('chat/createNewChat', undefined);
+  }
+
+  /** Delete a chat by ID — calls the REST API. */
+  async deleteChatFromSidebar(chatId: string): Promise<void> {
+    try {
+      await this.api.deleteChat(chatId);
+    } catch (err) {
+      console.error('[Bridge] Failed to delete chat:', err);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -165,6 +219,7 @@ export class WebBridge {
         mcpServers: data.mcpServers,
         chats: data.chats,
         config: this.buildSessionConfig(data),
+        trust: data.trust ?? false,
       };
     } catch (err) {
       console.error('[Bridge] Failed to parse session:connected', err);
@@ -185,6 +240,14 @@ export class WebBridge {
       switch (event.event) {
         case 'chat:content-received':
           this.dispatch('chat/contentReceived', data);
+          // Track new chats and title updates for the sidebar
+          if (data.chatId) {
+            this.upsertChatEntry(data.chatId, {});
+            if (data.content?.type === 'metadata' && data.content?.title) {
+              this.upsertChatEntry(data.chatId, { title: data.content.title });
+            }
+            this.notifyChatListChange();
+          }
           break;
 
         case 'chat:cleared':
@@ -193,10 +256,14 @@ export class WebBridge {
 
         case 'chat:deleted':
           this.dispatch('chat/deleted', data.chatId);
+          this.removeChatEntry(data.chatId);
+          this.notifyChatListChange();
           break;
 
         case 'chat:status-changed': {
           const status = data as SSEChatStatusPayload;
+          this.upsertChatEntry(status.chatId, { status: status.status });
+          this.notifyChatListChange();
           if (status.status === 'idle') {
             this.dispatch('chat/contentReceived', {
               chatId: status.chatId,
@@ -224,6 +291,12 @@ export class WebBridge {
         case 'session:message': {
           const msg = data as SSESessionMessagePayload;
           console.log(`[ECA ${msg.type}]`, msg.message);
+          break;
+        }
+
+        case 'trust:updated': {
+          const trustData = data as SSETrustUpdatedPayload;
+          this.dispatch('server/setTrust', trustData.trust);
           break;
         }
 
@@ -261,6 +334,9 @@ export class WebBridge {
         this.mcpServers = [...this.sessionState.mcpServers];
         this.dispatch('tool/serversUpdated', this.mcpServers);
       }
+
+      // Sync trust mode from server state
+      this.dispatch('server/setTrust', this.sessionState.trust ?? false);
 
       await this.restoreChats();
     } finally {
@@ -314,11 +390,18 @@ export class WebBridge {
       if (!chat?.id) continue;
       this.currentChatId = chat.id;
 
+      // Track in sidebar
+      this.upsertChatEntry(chat.id, {
+        title: chat.title ?? `Chat`,
+        status: chat.status ?? 'idle',
+      });
+
       const events = chatToRestoreEvents(chat);
       for (const event of events) {
         this.dispatch('chat/contentReceived', event);
       }
     }
+    this.notifyChatListChange();
   }
 
   // ---------------------------------------------------------------------------
@@ -391,5 +474,36 @@ export class WebBridge {
   /** Dispatch a message to the webview via window.postMessage. */
   private dispatch(type: string, data: unknown): void {
     window.postMessage({ type, data }, '*');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat entry tracking (for sidebar)
+  // ---------------------------------------------------------------------------
+
+  /** Notify the sidebar callback of chat list changes. */
+  private notifyChatListChange(): void {
+    this.onChatListChange?.([...this.chatEntries], this.currentChatId);
+  }
+
+  /** Upsert a chat entry by ID (creates if missing, updates if present). */
+  private upsertChatEntry(id: string, partial: Partial<Omit<ChatEntry, 'id'>>): void {
+    const idx = this.chatEntries.findIndex((e) => e.id === id);
+    if (idx >= 0) {
+      this.chatEntries = [
+        ...this.chatEntries.slice(0, idx),
+        { ...this.chatEntries[idx], ...partial },
+        ...this.chatEntries.slice(idx + 1),
+      ];
+    } else {
+      this.chatEntries = [
+        ...this.chatEntries,
+        { id, title: partial.title ?? `Chat`, status: partial.status ?? 'idle' },
+      ];
+    }
+  }
+
+  /** Remove a chat entry by ID. */
+  private removeChatEntry(id: string): void {
+    this.chatEntries = this.chatEntries.filter((e) => e.id !== id);
   }
 }

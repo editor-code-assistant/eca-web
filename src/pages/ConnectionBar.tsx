@@ -25,6 +25,8 @@ interface ConnectionBarProps {
   onSwitch: (id: string) => void;
   onRemove: (id: string) => void;
   onAdd: () => void;
+  /** Optional element rendered at the start of the bar (e.g. hamburger toggle). */
+  leftSlot?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,9 +39,11 @@ export function ConnectionBar({
   onSwitch,
   onRemove,
   onAdd,
+  leftSlot,
 }: ConnectionBarProps) {
   return (
     <div className="conn-bar">
+      {leftSlot}
       <div className="conn-bar-tabs">
         {entries.map((entry) => {
           const isActive = entry.id === activeId;
