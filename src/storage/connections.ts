@@ -12,7 +12,7 @@
 export interface Connection {
   id: string;
   host: string;
-  token: string;
+  password: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,9 +41,9 @@ export function loadConnections(): Connection[] {
   try {
     const legacy = localStorage.getItem(LEGACY_KEY);
     if (legacy) {
-      const { host, token } = JSON.parse(legacy);
-      if (host && token) {
-        const conn: Connection = { id: crypto.randomUUID(), host, token };
+      const { host, token: password } = JSON.parse(legacy);
+      if (host && password) {
+        const conn: Connection = { id: crypto.randomUUID(), host, password };
         localStorage.setItem(STORAGE_KEY, JSON.stringify([conn]));
         localStorage.setItem(ACTIVE_KEY, conn.id);
         localStorage.removeItem(LEGACY_KEY);
@@ -76,19 +76,23 @@ export function saveActiveId(id: string | null): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Consume a `?host=...&token=...` deep-link from the URL.
+ * Consume a `?host=...&pass=...` deep-link from the URL.
  *
  * If present, strips the query params from the URL bar (so they
- * don't linger or get bookmarked) and returns the host+token.
+ * don't linger or get bookmarked) and returns the host+password.
  * Returns null if no deep-link params are found.
  */
-export function consumeDeepLink(): { host: string; token: string } | null {
+export function consumeDeepLink(): { host: string; password: string } | null {
   const params = new URLSearchParams(window.location.search);
   const host = params.get('host');
-  const token = params.get('token');
-  if (host && token) {
+  const port = params.get('port');
+  const password = params.get('pass');
+  if (host && password) {
     window.history.replaceState({}, '', window.location.pathname);
-    return { host, token };
+    // If port is provided separately, combine it; otherwise use host as-is
+    // (which may already contain a port, e.g. host=192.168.1.42:7777)
+    const fullHost = port ? `${host}:${port}` : host;
+    return { host: fullHost, password };
   }
   return null;
 }

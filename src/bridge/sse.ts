@@ -27,7 +27,7 @@ export interface SSEClientOptions {
 
 export class SSEClient {
   private url: string;
-  private token: string;
+  private password: string;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private abortController: AbortController | null = null;
   private onEvent: EventHandler;
@@ -39,14 +39,14 @@ export class SSEClient {
 
   constructor(
     url: string,
-    token: string,
+    password: string,
     onEvent: EventHandler,
     onError: ErrorHandler,
     onDisconnect: () => void,
     options: SSEClientOptions = {},
   ) {
     this.url = url;
-    this.token = token;
+    this.password = password;
     this.onEvent = onEvent;
     this.onError = onError;
     this.onDisconnect = onDisconnect;
@@ -59,7 +59,7 @@ export class SSEClient {
     this.abortController = new AbortController();
 
     const response = await fetch(this.url, {
-      headers: { 'Authorization': `Bearer ${this.token}` },
+      headers: { 'Authorization': `Bearer ${this.password}` },
       signal: this.abortController.signal,
     });
 

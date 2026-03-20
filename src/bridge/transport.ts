@@ -24,8 +24,8 @@ import { SSEClient, type SSEEvent } from './sse';
 import type {
   ChatEntry,
   ChatListChangeCallback,
+  ChatSummary,
   MCPServerUpdatedParams,
-  RemoteChat,
   SessionConfig,
   SessionState,
   SSEChatStatusPayload,
@@ -56,6 +56,12 @@ export class WebBridge {
   private onChatListChange: ChatListChangeCallback | null = null;
 
   /**
+   * IDs of chats whose messages have already been fetched and dispatched.
+   * Used to avoid redundant loads when switching back to a previously viewed chat.
+   */
+  private loadedChatIds = new Set<string>();
+
+  /**
    * True after `disconnect()` has been called. Checked after every async
    * boundary in `connect()` so that orphaned bridges (e.g. from React
    * StrictMode mount-unmount-mount) abort instead of opening a second
@@ -77,8 +83,15 @@ export class WebBridge {
    */
   private initialStateDispatched = false;
 
-  constructor(host: string, token: string) {
-    this.api = new EcaRemoteApi(host, token);
+  /**
+   * Chat IDs known to belong to subagents. These are excluded from
+   * the sidebar to avoid cluttering the chat list with internal
+   * agent-spawned conversations.
+   */
+  private subagentChatIds = new Set<string>();
+
+  constructor(host: string, password: string) {
+    this.api = new EcaRemoteApi(host, password);
   }
 
   // ---------------------------------------------------------------------------
@@ -134,10 +147,21 @@ export class WebBridge {
     return this.currentChatId;
   }
 
-  /** Select a chat by ID — dispatches to the webview and updates tracking. */
-  selectChat(chatId: string): void {
+  /** Select a chat by ID — dispatches to the webview, loads messages if needed. */
+  async selectChat(chatId: string): Promise<void> {
     this.currentChatId = chatId;
-    this.dispatch('chat/selectChat', chatId);
+
+    const alreadyLoaded = this.loadedChatIds.has(chatId);
+    if (alreadyLoaded) {
+      // Chat already exists in webview Redux — just switch to it.
+      this.dispatch('chat/selectChat', chatId);
+    } else {
+      // Fetch and dispatch content events. The first contentReceived event
+      // auto-creates the chat in Redux and sets it as selectedChat, so we
+      // don't need a separate selectChat dispatch (which would race).
+      await this.loadChatMessages(chatId);
+    }
+
     this.notifyChatListChange();
   }
 
@@ -172,7 +196,7 @@ export class WebBridge {
 
       this.sse = new SSEClient(
         this.api.sseUrl(),
-        this.api.authToken,
+        this.api.authPassword,
         (event) => {
           if (event.event === 'session:connected' && !this.connected) {
             clearTimeout(timeout);
@@ -220,6 +244,7 @@ export class WebBridge {
         chats: data.chats,
         config: this.buildSessionConfig(data),
         trust: data.trust ?? false,
+        startedAt: data.startedAt,
       };
     } catch (err) {
       console.error('[Bridge] Failed to parse session:connected', err);
@@ -240,8 +265,16 @@ export class WebBridge {
       switch (event.event) {
         case 'chat:content-received':
           this.dispatch('chat/contentReceived', data);
-          // Track new chats and title updates for the sidebar
-          if (data.chatId) {
+
+          // Track subagent chat IDs so they never appear in the sidebar.
+          if (data.parentChatId && data.chatId) {
+            this.subagentChatIds.add(data.chatId);
+          }
+
+          // Track new chats and title updates for the sidebar.
+          // Skip subagent chats — they render inside the parent chat's tool call.
+          if (data.chatId && !this.subagentChatIds.has(data.chatId)) {
+            this.loadedChatIds.add(data.chatId);
             this.upsertChatEntry(data.chatId, {});
             if (data.content?.type === 'metadata' && data.content?.title) {
               this.upsertChatEntry(data.chatId, { title: data.content.title });
@@ -252,18 +285,23 @@ export class WebBridge {
 
         case 'chat:cleared':
           this.dispatch('chat/cleared', { chatId: data.chatId, messages: true });
+          this.loadedChatIds.delete(data.chatId);
           break;
 
         case 'chat:deleted':
           this.dispatch('chat/deleted', data.chatId);
           this.removeChatEntry(data.chatId);
+          this.loadedChatIds.delete(data.chatId);
           this.notifyChatListChange();
           break;
 
         case 'chat:status-changed': {
           const status = data as SSEChatStatusPayload;
-          this.upsertChatEntry(status.chatId, { status: status.status });
-          this.notifyChatListChange();
+          // Only update sidebar for non-subagent chats
+          if (!this.subagentChatIds.has(status.chatId)) {
+            this.upsertChatEntry(status.chatId, { status: status.status });
+            this.notifyChatListChange();
+          }
           if (status.status === 'idle') {
             this.dispatch('chat/contentReceived', {
               chatId: status.chatId,
@@ -320,8 +358,6 @@ export class WebBridge {
 
     this.restoring = true;
     try {
-      this.dispatch('server/statusChanged', 'Running');
-
       if (this.sessionState.workspaceFolders) {
         this.dispatch('server/setWorkspaceFolders', this.sessionState.workspaceFolders);
       }
@@ -338,70 +374,141 @@ export class WebBridge {
       // Sync trust mode from server state
       this.dispatch('server/setTrust', this.sessionState.trust ?? false);
 
+      // Load chat summaries + most recent chat messages BEFORE marking
+      // the server as running — the webview renders the Chat component
+      // once it sees "Running", so chats must be populated first.
       await this.restoreChats();
+
+      this.dispatch('server/statusChanged', 'Running');
     } finally {
       this.restoring = false;
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Chat restoration
+  // Chat restoration (lazy-load)
   // ---------------------------------------------------------------------------
 
   /**
-   * Restore chats — prefer session:connected data, fall back to REST.
-   * Uses chat-restore.ts for message format conversion.
+   * Populate the sidebar with chat summaries from session:connected (or REST
+   * fallback). Messages are NOT loaded here — they are fetched on demand when
+   * the user selects a chat via `loadChatMessages()`.
+   *
+   * When the server provides a `startedAt` timestamp, only chats that were
+   * created or updated since the server started are shown. This prevents the
+   * sidebar from filling up with stale chats from previous server sessions.
+   * Chats that a user resumed (updated) after the server started are included.
    */
   private async restoreChats(): Promise<void> {
-    const sessionChats = this.sessionState?.chats;
+    let summaries: ChatSummary[] | undefined = this.sessionState?.chats;
 
-    if (sessionChats?.length) {
-      console.log(`[Bridge] Restoring ${sessionChats.length} chat(s) from session:connected`);
-      this.dispatchChatEvents(sessionChats);
-      return;
+    // Fallback: fetch summaries from REST if session:connected had none
+    if (!summaries?.length) {
+      try {
+        summaries = await this.api.chats();
+      } catch (err) {
+        console.error('[Bridge] Failed to fetch chat list:', err);
+        return;
+      }
     }
 
-    // Fallback: fetch from REST API
-    try {
-      const summaries = await this.api.chats();
-      if (!summaries?.length) return;
+    if (!summaries?.length) return;
 
-      console.log(`[Bridge] Fetched ${summaries.length} chat(s) from REST API`);
-      const fullChats: RemoteChat[] = [];
-      for (const summary of summaries) {
-        try {
-          const chat = await this.api.getChat(summary.id);
-          if (chat) fullChats.push(chat);
-        } catch (err) {
-          console.error(`[Bridge] Failed to fetch chat ${summary.id}:`, err);
+    // Exclude subagent chats — they are rendered inside their parent chat's
+    // tool call card, not as standalone sidebar entries.
+    summaries = summaries.filter((s) => {
+      if (s.parentChatId) {
+        this.subagentChatIds.add(s.id);
+        return false;
+      }
+      return true;
+    });
+
+    if (!summaries?.length) return;
+
+    // Filter to only show chats from the current server session.
+    // A chat qualifies if it was created or updated after the server started,
+    // or if it is currently running (active right now).
+    const serverStartedAt = this.sessionState?.startedAt;
+    if (serverStartedAt) {
+      const startTime = new Date(serverStartedAt).getTime();
+      const before = summaries.length;
+      summaries = summaries.filter((s) => {
+        // Always show currently running chats
+        if (s.status === 'running') return true;
+        // Show if updated (resumed) since server started.
+        // Timestamps may be epoch millis (number) or ISO strings.
+        const updated = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
+        if (updated >= startTime) return true;
+        // Show if created since server started (and never updated)
+        if (!s.updatedAt) {
+          const created = s.createdAt ? new Date(s.createdAt).getTime() : 0;
+          if (created >= startTime) return true;
         }
-      }
-      if (fullChats.length) {
-        this.dispatchChatEvents(fullChats);
-      }
-    } catch (err) {
-      console.error('[Bridge] Failed to fetch chat list:', err);
+        return false;
+      });
+      console.log(`[Bridge] Filtered chats: ${before} total → ${summaries.length} from current session`);
     }
+
+    if (!summaries?.length) return;
+
+    console.log(`[Bridge] Populating sidebar with ${summaries.length} chat(s)`);
+
+    // Register sidebar entries for every chat (no messages dispatched)
+    for (const summary of summaries) {
+      if (!summary?.id) continue;
+      this.upsertChatEntry(summary.id, {
+        title: summary.title ?? 'Chat',
+        status: summary.status ?? 'idle',
+      });
+    }
+
+    // Auto-select and load the most recent chat
+    const lastChat = summaries[summaries.length - 1];
+    if (lastChat?.id) {
+      this.currentChatId = lastChat.id;
+      await this.loadChatMessages(lastChat.id);
+    }
+
+    this.notifyChatListChange();
   }
 
-  /** Dispatch restore events for a list of chats. */
-  private dispatchChatEvents(chats: RemoteChat[]): void {
-    for (const chat of chats) {
-      if (!chat?.id) continue;
-      this.currentChatId = chat.id;
+  /**
+   * Lazy-load a single chat's messages from the server and dispatch them
+   * to the webview. Skips if the chat was already loaded.
+   *
+   * Called automatically on initial connect (for the most recent chat)
+   * and on demand when the user switches chats.
+   */
+  async loadChatMessages(chatId: string): Promise<void> {
+    if (this.loadedChatIds.has(chatId)) return;
 
-      // Track in sidebar
-      this.upsertChatEntry(chat.id, {
-        title: chat.title ?? `Chat`,
-        status: chat.status ?? 'idle',
-      });
+    try {
+      console.log(`[Bridge] Loading messages for chat ${chatId}`);
+      const chat = await this.api.getChat(chatId);
+      this.loadedChatIds.add(chatId);
 
       const events = chatToRestoreEvents(chat);
+
+      // Always dispatch at least one event so the webview's Redux store
+      // creates the chat entry (the addContentReceived reducer auto-creates
+      // chats on first content). For empty chats, send a metadata event.
+      if (events.length === 0) {
+        events.push({
+          chatId,
+          role: 'system' as const,
+          content: { type: 'metadata', title: chat?.title ?? 'Chat' },
+        });
+      }
+
       for (const event of events) {
         this.dispatch('chat/contentReceived', event);
       }
+
+      console.log(`[Bridge] Loaded ${chat?.messages?.length ?? 0} message(s) for chat ${chatId}`);
+    } catch (err) {
+      console.error(`[Bridge] Failed to load messages for chat ${chatId}:`, err);
     }
-    this.notifyChatListChange();
   }
 
   // ---------------------------------------------------------------------------
@@ -432,6 +539,7 @@ export class WebBridge {
       getCurrentChatId: () => this.currentChatId,
       setCurrentChatId: (id) => { this.currentChatId = id; },
       dispatchInitialState: () => this.dispatchInitialState(),
+      loadChatMessages: (chatId) => this.loadChatMessages(chatId),
     };
     handleOutbound(msg, ctx);
   }

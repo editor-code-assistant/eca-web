@@ -41,7 +41,8 @@ export interface SessionResponse {
   models?: ModelInfo[];
   agents?: AgentInfo[];
   mcpServers?: MCPServerUpdatedParams[];
-  chats?: RemoteChat[];
+  /** Chat summaries only (no messages) — messages are lazy-loaded per chat. */
+  chats?: ChatSummary[];
   welcomeMessage?: string;
   selectModel?: string;
   selectAgent?: string;
@@ -64,8 +65,12 @@ export interface ChatSummary {
   id: string;
   title?: string;
   status?: 'idle' | 'running';
-  createdAt?: string;
-  updatedAt?: string;
+  /** Creation timestamp — epoch millis (number) or ISO string. */
+  createdAt?: string | number;
+  /** Last activity timestamp — epoch millis (number) or ISO string. */
+  updatedAt?: string | number;
+  /** Present when this chat belongs to a subagent. Subagent chats are excluded from the sidebar. */
+  parentChatId?: string;
 }
 
 /** GET /api/v1/chats/:id — full chat detail */
@@ -169,13 +174,16 @@ export interface SSESessionConnectedPayload {
   models?: ModelInfo[];
   agents?: AgentInfo[];
   mcpServers?: MCPServerUpdatedParams[];
-  chats?: RemoteChat[];
+  /** Chat summaries only (no messages) — messages are lazy-loaded per chat. */
+  chats?: ChatSummary[];
   welcomeMessage?: string;
   selectModel?: string;
   selectAgent?: string;
   variants?: string[];
   selectedVariant?: string | null;
   trust?: boolean;
+  /** ISO timestamp of when the server process started. Used to filter stale chats. */
+  startedAt?: string;
 }
 
 export interface SSETrustUpdatedPayload {
@@ -201,9 +209,12 @@ export interface SessionState {
   models?: ModelInfo[];
   agents?: AgentInfo[];
   mcpServers?: MCPServerUpdatedParams[];
-  chats?: RemoteChat[];
+  /** Chat summaries (no messages) from the initial session:connected event. */
+  chats?: ChatSummary[];
   config?: SessionConfig;
   trust?: boolean;
+  /** ISO timestamp of when the server process started. Used to filter stale chats. */
+  startedAt?: string;
 }
 
 export interface SessionConfig {

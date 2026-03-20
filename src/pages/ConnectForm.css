@@ -48,11 +48,38 @@
   gap: 1rem;
 }
 
+.connect-host-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
 .connect-field {
   display: flex;
   flex-direction: column;
   text-align: left;
   gap: 0.35rem;
+}
+
+.connect-field-host {
+  flex: 1;
+  min-width: 0;
+}
+
+.connect-field-port {
+  width: 90px;
+  flex-shrink: 0;
+}
+
+/* Hide number input spinner arrows */
+.connect-field-port input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.connect-field-port input[type='number']::-webkit-inner-spin-button,
+.connect-field-port input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .connect-field label {

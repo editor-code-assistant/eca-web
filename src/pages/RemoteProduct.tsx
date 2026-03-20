@@ -7,7 +7,7 @@
  * - Renders a tab bar for switching (ConnectionBar)
  * - Renders either the connect form or the active session
  *
- * Supports deep-linking via `?host=...&token=...` query params.
+ * Supports deep-linking via `?host=...&pass=...` query params.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -43,7 +43,7 @@ export function RemoteProduct() {
   // --- Persistence ---
 
   useEffect(() => {
-    saveConnections(entries.map(({ id, host, token }) => ({ id, host, token })));
+    saveConnections(entries.map(({ id, host, password }) => ({ id, host, password })));
   }, [entries]);
 
   useEffect(() => {
@@ -80,19 +80,33 @@ export function RemoteProduct() {
 
   // --- Connection management ---
 
-  const addConnection = useCallback(async (host: string, token: string) => {
+  const addConnection = useCallback(async (host: string, password: string) => {
     setFormConnecting(true);
     setFormError(null);
 
     try {
-      const error = await testConnection(host, token);
+      const error = await testConnection(host, password);
       if (error) {
         setFormError(error);
         return;
       }
 
+      // If a connection to this host already exists, switch to it
+      const existing = entries.find((e) => e.host === host);
+      if (existing) {
+        // Update password in case it changed
+        if (existing.password !== password) {
+          setEntries((prev) =>
+            prev.map((e) => (e.id === existing.id ? { ...e, password } : e)),
+          );
+        }
+        setActiveId(existing.id);
+        setShowForm(false);
+        return;
+      }
+
       const id = crypto.randomUUID();
-      setEntries((prev) => [...prev, { id, host, token, status: 'idle' }]);
+      setEntries((prev) => [...prev, { id, host, password, status: 'idle' }]);
       setActiveId(id);
       setShowForm(false);
     } catch {
@@ -100,7 +114,7 @@ export function RemoteProduct() {
     } finally {
       setFormConnecting(false);
     }
-  }, []);
+  }, [entries]);
 
   const removeConnection = useCallback((id: string) => {
     setEntries((prev) => {
@@ -186,7 +200,7 @@ export function RemoteProduct() {
             <RemoteSession
               key={activeEntry.id}
               host={activeEntry.host}
-              token={activeEntry.token}
+              password={activeEntry.password}
               onStatusChange={(status, error) =>
                 handleStatusChange(activeEntry.id, status, error)
               }

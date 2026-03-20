@@ -18,11 +18,11 @@ import { resolveBaseUrl } from './utils';
 
 export class EcaRemoteApi {
   private baseUrl: string;
-  private token: string;
+  private password: string;
 
-  constructor(host: string, token: string) {
+  constructor(host: string, password: string) {
     this.baseUrl = resolveBaseUrl(host);
-    this.token = token;
+    this.password = password;
   }
 
   // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export class EcaRemoteApi {
 
   /** Build auth + optional JSON content-type headers. */
   private headers(json = false): HeadersInit {
-    const h: HeadersInit = { 'Authorization': `Bearer ${this.token}` };
+    const h: HeadersInit = { 'Authorization': `Bearer ${this.password}` };
     if (json) h['Content-Type'] = 'application/json';
     return h;
   }
@@ -219,8 +219,8 @@ export class EcaRemoteApi {
     return `${this.baseUrl}/events`;
   }
 
-  /** The auth token (needed by SSEClient to authenticate the stream). */
-  get authToken(): string {
-    return this.token;
+  /** The auth password (needed by SSEClient to authenticate the stream). */
+  get authPassword(): string {
+    return this.password;
   }
 }

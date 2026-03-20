@@ -25,6 +25,8 @@ export interface OutboundContext {
   setCurrentChatId: (id: string) => void;
   /** Triggers initial state dispatch (called on webview/ready). */
   dispatchInitialState: () => Promise<void>;
+  /** Lazy-load messages for a chat (fetches from server if not yet loaded). */
+  loadChatMessages: (chatId: string) => Promise<void>;
 }
 
 /**
@@ -179,10 +181,15 @@ export async function handleOutbound(
 
 /**
  * Handle a user prompt: creates a new chat if no chatId is provided.
+ * Ensures the chat messages are loaded before sending (handles the case
+ * where a prompt targets a chat whose history hasn't been lazy-loaded yet).
  */
 async function handleUserPrompt(data: UserPromptData, ctx: OutboundContext): Promise<void> {
   const chatId = data.chatId || crypto.randomUUID();
   ctx.setCurrentChatId(chatId);
+
+  // Ensure messages are loaded so the webview has full context
+  await ctx.loadChatMessages(chatId);
 
   await ctx.api.sendPrompt(chatId, {
     message: data.prompt,

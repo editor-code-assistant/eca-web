@@ -7,13 +7,13 @@ export type SessionStatus = 'connecting' | 'connected' | 'error';
 
 interface RemoteSessionProps {
   host: string;
-  token: string;
+  password: string;
   onStatusChange: (status: SessionStatus, error?: string) => void;
   /** Called when the bridge instance changes (connected or disconnected). */
   onBridgeChange?: (bridge: WebBridge | null) => void;
 }
 
-export function RemoteSession({ host, token, onStatusChange, onBridgeChange }: RemoteSessionProps) {
+export function RemoteSession({ host, password, onStatusChange, onBridgeChange }: RemoteSessionProps) {
   const [state, setState] = useState<
     | { status: 'connecting' }
     | { status: 'connected' }
@@ -34,7 +34,7 @@ export function RemoteSession({ host, token, onStatusChange, onBridgeChange }: R
     // Disconnect any existing bridge
     bridgeRef.current?.disconnect();
 
-    const bridge = new WebBridge(host, token);
+    const bridge = new WebBridge(host, password);
     bridgeRef.current = bridge;
 
     try {
@@ -55,7 +55,7 @@ export function RemoteSession({ host, token, onStatusChange, onBridgeChange }: R
       onStatusChangeRef.current('error', message);
       onBridgeChangeRef.current?.(null);
     }
-  }, [host, token]);
+  }, [host, password]);
 
   // Connect on mount
   useEffect(() => {

@@ -6,7 +6,7 @@
  *
  * Usage:
  *   import { WebBridge } from '@/bridge';
- *   const bridge = new WebBridge(host, token);
+ *   const bridge = new WebBridge(host, password);
  *   await bridge.connect();
  */
 

@@ -14,7 +14,7 @@ import type { SessionStatus } from './RemoteSession';
 export interface ConnectionEntry {
   id: string;
   host: string;
-  token: string;
+  password: string;
   status: SessionStatus | 'idle';
   error?: string;
 }
