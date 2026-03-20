@@ -35,7 +35,7 @@ export function RemoteSession({ host, token, onStatusChange }: RemoteSessionProp
 
     try {
       await bridge.connect();
-      if (!mountedRef.current) {
+      if (!mountedRef.current || !bridge.isConnected()) {
         bridge.disconnect();
         return;
       }

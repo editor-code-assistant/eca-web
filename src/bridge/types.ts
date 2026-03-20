@@ -43,6 +43,8 @@ export interface SessionResponse {
   mcpServers?: MCPServerUpdatedParams[];
   chats?: RemoteChat[];
   welcomeMessage?: string;
+  selectModel?: string;
+  selectAgent?: string;
   variants?: string[];
   selectedVariant?: string | null;
 }
@@ -168,6 +170,8 @@ export interface SSESessionConnectedPayload {
   mcpServers?: MCPServerUpdatedParams[];
   chats?: RemoteChat[];
   welcomeMessage?: string;
+  selectModel?: string;
+  selectAgent?: string;
   variants?: string[];
   selectedVariant?: string | null;
 }
@@ -200,6 +204,8 @@ export interface SessionConfig {
     models: string[];
     agents: string[];
     welcomeMessage: string;
+    selectModel?: string;
+    selectAgent?: string;
     variants: string[];
     selectedVariant: string | null;
   };

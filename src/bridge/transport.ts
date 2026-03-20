@@ -44,11 +44,26 @@ export class WebBridge {
   private mcpServers: MCPServerUpdatedParams[] = [];
 
   /**
+   * True after `disconnect()` has been called. Checked after every async
+   * boundary in `connect()` so that orphaned bridges (e.g. from React
+   * StrictMode mount-unmount-mount) abort instead of opening a second
+   * SSE connection.
+   */
+  private disposed = false;
+
+  /**
    * True while the bridge is restoring chat state from the server.
    * During this window, live `chat:content-received` SSE events are
    * skipped to prevent duplicate messages in the webview.
    */
   private restoring = false;
+
+  /**
+   * True after `dispatchInitialState()` has executed once.  Prevents
+   * React StrictMode's double `webview/ready` from restoring the same
+   * chat state twice.
+   */
+  private initialStateDispatched = false;
 
   constructor(host: string, token: string) {
     this.api = new EcaRemoteApi(host, token);
@@ -60,12 +75,17 @@ export class WebBridge {
 
   async connect(): Promise<void> {
     await this.api.health();
+    if (this.disposed) return;
+
     await this.connectSSE();
+    if (this.disposed) return;
+
     this.registerOutboundHandler();
     this.registerTransport();
   }
 
   disconnect(): void {
+    this.disposed = true;
     this.connected = false;
     this.sse?.disconnect();
     this.sse = null;
@@ -152,6 +172,8 @@ export class WebBridge {
   }
 
   private handleSSEEvent(event: SSEEvent): void {
+    if (this.disposed) return;
+
     // Skip chat content during restore to prevent duplicates
     if (this.restoring && event.event === 'chat:content-received') {
       return;
@@ -220,7 +242,8 @@ export class WebBridge {
   // ---------------------------------------------------------------------------
 
   private async dispatchInitialState(): Promise<void> {
-    if (!this.sessionState) return;
+    if (this.initialStateDispatched || !this.sessionState) return;
+    this.initialStateDispatched = true;
 
     this.restoring = true;
     try {
@@ -357,6 +380,8 @@ export class WebBridge {
         models: (data.models || []).map((m) => m.id || String(m)),
         agents: (data.agents || []).map((a) => a.id || String(a)),
         welcomeMessage: data.welcomeMessage || 'Welcome to ECA Web',
+        selectModel: data.selectModel,
+        selectAgent: data.selectAgent,
         variants: data.variants || [],
         selectedVariant: data.selectedVariant || null,
       },

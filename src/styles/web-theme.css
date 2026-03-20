@@ -61,3 +61,29 @@ html[data-editor="web"] {
   --eca-context-cursor-fg: #dcdcdc;
   --eca-context-mcp-resource-fg: #23d18b;
 }
+
+/* ——— Desktop layout: centered chat column ———
+ *
+ * On wide screens the chat stretches edge-to-edge which hurts readability.
+ * Instead of padding individual elements we constrain the whole session
+ * container so every child (header, messages, prompt) shares the same
+ * column width — like ChatGPT / Claude.ai.
+ */
+@media (min-width: 768px) {
+  /* Darken the gutter area so the chat column stands out naturally */
+  [data-editor="web"] .remote-product-content {
+    background: #0c0c16;
+  }
+
+  [data-editor="web"] .remote-session {
+    max-width: 56em;
+    width: 100%;
+    margin: 0 auto;
+    background: var(--eca-base-bg);
+  }
+}
+
+/* Contexts area (@ file picker) is an editor-only feature — hide in web */
+[data-editor="web"] .prompt-area .contexts {
+  display: none;
+}
