@@ -1,0 +1,5 @@
+services:
+  eca-web:
+    image: ghcr.io/editor-code-assistant/eca-web:latest
+    ports:
+      - "8080:80"

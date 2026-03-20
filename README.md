@@ -45,7 +45,34 @@ eca-web/
 
 The `eca-webview/` directory is a **git submodule** containing the shared webview UI used by the VS Code extension, IntelliJ plugin, and this web app. The Vite alias `@webview` points to `eca-webview/src`.
 
-## Setup
+## Run locally with Docker
+
+The fastest way to run eca-web on your machine — no Node.js required:
+
+```bash
+docker run -p 8080:80 ghcr.io/editor-code-assistant/eca-web
+```
+
+Then open [http://localhost:8080](http://localhost:8080).
+
+Or using Docker Compose:
+
+```bash
+# Download the compose file (or clone the repo)
+curl -O https://raw.githubusercontent.com/editor-code-assistant/eca-web/master/docker-compose.yml
+
+docker compose up
+```
+
+### Available tags
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest build from `master` |
+| `<sha>` | Pinned to a specific commit |
+| `<version>` | Semantic version (e.g. `1.0.0`, `1.0`) when tagged |
+
+## Development setup
 
 ```bash
 git clone --recurse-submodules https://github.com/editor-code-assistant/eca-web.git
@@ -58,8 +85,6 @@ If you already cloned without `--recurse-submodules`:
 ```bash
 git submodule update --init
 ```
-
-## Development
 
 ```bash
 npm run dev        # Start dev server on http://localhost:5180
