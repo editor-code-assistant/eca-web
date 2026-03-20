@@ -21,6 +21,7 @@ import { EcaRemoteApi } from './api';
 import { chatToRestoreEvents } from './chat-restore';
 import { handleOutbound, type OutboundContext } from './outbound-handler';
 import { SSEClient, type SSEEvent } from './sse';
+import type { Protocol } from './utils';
 import type {
   ChatEntry,
   ChatListChangeCallback,
@@ -90,8 +91,8 @@ export class WebBridge {
    */
   private subagentChatIds = new Set<string>();
 
-  constructor(host: string, password: string) {
-    this.api = new EcaRemoteApi(host, password);
+  constructor(host: string, password: string, protocol?: Protocol) {
+    this.api = new EcaRemoteApi(host, password, protocol);
   }
 
   // ---------------------------------------------------------------------------

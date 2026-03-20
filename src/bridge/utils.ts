@@ -6,11 +6,15 @@
  * use the same logic.
  */
 
+export type Protocol = 'http' | 'https';
+
 /**
  * Resolve the HTTP protocol for a given host string.
- * Localhost / 127.0.0.1 → http, everything else → https.
+ * When an explicit protocol is provided it is used as-is;
+ * otherwise localhost / 127.0.0.1 → http, everything else → https.
  */
-export function resolveProtocol(host: string): 'http' | 'https' {
+export function resolveProtocol(host: string, protocol?: Protocol): Protocol {
+  if (protocol) return protocol;
   if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
     return 'http';
   }
@@ -20,8 +24,8 @@ export function resolveProtocol(host: string): 'http' | 'https' {
 /**
  * Build the base API URL for a host, e.g. "https://myhost:7888/api/v1".
  */
-export function resolveBaseUrl(host: string): string {
-  return `${resolveProtocol(host)}://${host}/api/v1`;
+export function resolveBaseUrl(host: string, protocol?: Protocol): string {
+  return `${resolveProtocol(host, protocol)}://${host}/api/v1`;
 }
 
 /**

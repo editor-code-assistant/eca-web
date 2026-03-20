@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry } from '../bridge/types';
+import type { Protocol } from '../bridge/utils';
 import { ChatSidebar, ChatSidebarToggle } from '../components/ChatSidebar';
 import {
   consumeDeepLink,
@@ -43,7 +44,7 @@ export function RemoteProduct() {
   // --- Persistence ---
 
   useEffect(() => {
-    saveConnections(entries.map(({ id, host, password }) => ({ id, host, password })));
+    saveConnections(entries.map(({ id, host, password, protocol }) => ({ id, host, password, protocol })));
   }, [entries]);
 
   useEffect(() => {
@@ -80,12 +81,12 @@ export function RemoteProduct() {
 
   // --- Connection management ---
 
-  const addConnection = useCallback(async (host: string, password: string) => {
+  const addConnection = useCallback(async (host: string, password: string, protocol?: Protocol) => {
     setFormConnecting(true);
     setFormError(null);
 
     try {
-      const error = await testConnection(host, password);
+      const error = await testConnection(host, password, protocol);
       if (error) {
         setFormError(error);
         return;
@@ -94,10 +95,10 @@ export function RemoteProduct() {
       // If a connection to this host already exists, switch to it
       const existing = entries.find((e) => e.host === host);
       if (existing) {
-        // Update password in case it changed
-        if (existing.password !== password) {
+        // Update password/protocol in case they changed
+        if (existing.password !== password || existing.protocol !== protocol) {
           setEntries((prev) =>
-            prev.map((e) => (e.id === existing.id ? { ...e, password } : e)),
+            prev.map((e) => (e.id === existing.id ? { ...e, password, protocol } : e)),
           );
         }
         setActiveId(existing.id);
@@ -106,7 +107,7 @@ export function RemoteProduct() {
       }
 
       const id = crypto.randomUUID();
-      setEntries((prev) => [...prev, { id, host, password, status: 'idle' }]);
+      setEntries((prev) => [...prev, { id, host, password, protocol, status: 'idle' }]);
       setActiveId(id);
       setShowForm(false);
     } catch {
@@ -192,7 +193,7 @@ export function RemoteProduct() {
         <div className="remote-product-content">
           {shouldShowForm ? (
             <ConnectForm
-              onConnect={addConnection}
+              onConnect={(host, password, protocol) => addConnection(host, password, protocol)}
               isConnecting={formConnecting}
               error={formError}
             />
@@ -201,6 +202,7 @@ export function RemoteProduct() {
               key={activeEntry.id}
               host={activeEntry.host}
               password={activeEntry.password}
+              protocol={activeEntry.protocol}
               onStatusChange={(status, error) =>
                 handleStatusChange(activeEntry.id, status, error)
               }

@@ -65,6 +65,64 @@
   min-width: 0;
 }
 
+.connect-host-input-group {
+  display: flex;
+  align-items: stretch;
+  background: #22223a;
+  border: 1px solid #2a2a3e;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.connect-host-input-group:focus-within {
+  border-color: #00a5b8;
+}
+
+.connect-protocol-prefix {
+  flex-shrink: 0;
+  padding: 0.65rem 0.55rem 0.65rem 0.8rem;
+  border: none;
+  background: transparent;
+  color: #00a5b8;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s;
+  user-select: none;
+}
+
+.connect-protocol-prefix:hover:not(:disabled) {
+  color: #00c8de;
+}
+
+.connect-protocol-prefix:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.connect-host-input-group input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.65rem 0.8rem 0.65rem 0;
+  font-size: 0.95rem;
+  color: #e0e4ea;
+  outline: none;
+}
+
+.connect-host-input-group input::placeholder {
+  color: #5a6a7a;
+}
+
+.connect-host-input-group input:disabled {
+  opacity: 0.6;
+}
+
 .connect-field-port {
   width: 90px;
   flex-shrink: 0;

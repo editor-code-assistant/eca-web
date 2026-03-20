@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import type { Protocol } from '../bridge/utils';
 import './ConnectForm.css';
 
 interface ConnectFormProps {
-  onConnect: (host: string, password: string) => Promise<void>;
+  onConnect: (host: string, password: string, protocol: Protocol) => Promise<void>;
   error?: string | null;
   isConnecting?: boolean;
 }
@@ -11,13 +12,14 @@ export function ConnectForm({ onConnect, error, isConnecting }: ConnectFormProps
   const [host, setHost] = useState('');
   const [port, setPort] = useState('7777');
   const [password, setPassword] = useState('');
+  const [protocol, setProtocol] = useState<Protocol>('https');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedHost = host.trim();
     const trimmedPort = port.trim();
     if (trimmedHost && trimmedPort && password.trim()) {
-      onConnect(`${trimmedHost}:${trimmedPort}`, password.trim());
+      onConnect(`${trimmedHost}:${trimmedPort}`, password.trim(), protocol);
     }
   };
 
@@ -34,15 +36,26 @@ export function ConnectForm({ onConnect, error, isConnecting }: ConnectFormProps
           <div className="connect-host-row">
             <div className="connect-field connect-field-host">
               <label htmlFor="host">Host</label>
-              <input
-                id="host"
-                type="text"
-                placeholder="192.168.1.42"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                disabled={isConnecting}
-                autoFocus
-              />
+              <div className="connect-host-input-group">
+                <button
+                  type="button"
+                  className="connect-protocol-prefix"
+                  onClick={() => setProtocol((p) => (p === 'https' ? 'http' : 'https'))}
+                  disabled={isConnecting}
+                  title="Click to toggle HTTP / HTTPS"
+                >
+                  {protocol}://
+                </button>
+                <input
+                  id="host"
+                  type="text"
+                  placeholder="192.168.1.42"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  disabled={isConnecting}
+                  autoFocus
+                />
+              </div>
             </div>
             <div className="connect-field connect-field-port">
               <label htmlFor="port">Port</label>

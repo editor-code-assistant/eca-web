@@ -7,6 +7,7 @@
  * SSE connection.
  */
 
+import type { Protocol } from './utils';
 import { fetchWithTimeout, resolveBaseUrl } from './utils';
 
 /**
@@ -17,8 +18,8 @@ import { fetchWithTimeout, resolveBaseUrl } from './utils';
  * 1. Health endpoint (unauthenticated) — tests reachability
  * 2. Session endpoint (authenticated) — tests credentials
  */
-export async function testConnection(host: string, password: string): Promise<string | null> {
-  const baseUrl = resolveBaseUrl(host);
+export async function testConnection(host: string, password: string, protocol?: Protocol): Promise<string | null> {
+  const baseUrl = resolveBaseUrl(host, protocol);
 
   // 1. Test host reachability (health endpoint — no auth)
   try {

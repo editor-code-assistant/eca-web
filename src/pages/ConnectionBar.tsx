@@ -5,6 +5,7 @@
  * and close button. Includes an "add" button to open the connect form.
  */
 
+import type { Protocol } from '../bridge/utils';
 import type { SessionStatus } from './RemoteSession';
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,7 @@ export interface ConnectionEntry {
   id: string;
   host: string;
   password: string;
+  protocol?: Protocol;
   status: SessionStatus | 'idle';
   error?: string;
 }

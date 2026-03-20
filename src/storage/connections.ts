@@ -5,6 +5,8 @@
  * Includes one-time migration from the legacy single-connection format.
  */
 
+import type { Protocol } from '../bridge/utils';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -13,6 +15,7 @@ export interface Connection {
   id: string;
   host: string;
   password: string;
+  protocol?: Protocol;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,17 +85,18 @@ export function saveActiveId(id: string | null): void {
  * don't linger or get bookmarked) and returns the host+password.
  * Returns null if no deep-link params are found.
  */
-export function consumeDeepLink(): { host: string; password: string } | null {
+export function consumeDeepLink(): { host: string; password: string; protocol?: Protocol } | null {
   const params = new URLSearchParams(window.location.search);
   const host = params.get('host');
   const port = params.get('port');
   const password = params.get('pass');
+  const proto = params.get('protocol') as Protocol | null;
   if (host && password) {
     window.history.replaceState({}, '', window.location.pathname);
     // If port is provided separately, combine it; otherwise use host as-is
     // (which may already contain a port, e.g. host=192.168.1.42:7777)
     const fullHost = port ? `${host}:${port}` : host;
-    return { host: fullHost, password };
+    return { host: fullHost, password, protocol: proto ?? undefined };
   }
   return null;
 }

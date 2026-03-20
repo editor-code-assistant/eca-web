@@ -14,14 +14,15 @@ import type {
   SendPromptResponse,
   SessionResponse,
 } from './types';
+import type { Protocol } from './utils';
 import { resolveBaseUrl } from './utils';
 
 export class EcaRemoteApi {
   private baseUrl: string;
   private password: string;
 
-  constructor(host: string, password: string) {
-    this.baseUrl = resolveBaseUrl(host);
+  constructor(host: string, password: string, protocol?: Protocol) {
+    this.baseUrl = resolveBaseUrl(host, protocol);
     this.password = password;
   }
 
