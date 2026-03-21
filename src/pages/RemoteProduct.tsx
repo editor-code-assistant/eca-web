@@ -77,11 +77,11 @@ export function RemoteProduct() {
     return () => window.removeEventListener('eca-toggle-sidebar', handler);
   }, []);
 
-  // --- Guard stale activeId ---
+  // --- Guard stale / missing activeId ---
 
   useEffect(() => {
-    if (activeId && entries.length > 0 && !entries.find((e) => e.id === activeId)) {
-      setActiveId(null);
+    if (entries.length > 0 && !entries.find((e) => e.id === activeId)) {
+      setActiveId(entries[entries.length - 1].id);
     }
   }, [entries, activeId]);
 
@@ -160,8 +160,9 @@ export function RemoteProduct() {
       return;
     }
 
-    // Create a connection entry for each found port
-    let firstNewId: string | null = null;
+    // Create a connection entry for each found port, select the latest (highest port)
+    let latestId: string | null = null;
+    let latestPort = -1;
     setEntries((prev) => {
       const next = [...prev];
       for (const port of progress.found) {
@@ -172,17 +173,17 @@ export function RemoteProduct() {
           if (existing.password !== password || existing.protocol !== protocol) {
             Object.assign(existing, { password, protocol });
           }
-          if (!firstNewId) firstNewId = existing.id;
+          if (port > latestPort) { latestPort = port; latestId = existing.id; }
         } else {
           const id = crypto.randomUUID();
           next.push({ id, host: hostWithPort, password, protocol, status: 'idle' });
-          if (!firstNewId) firstNewId = id;
+          if (port > latestPort) { latestPort = port; latestId = id; }
         }
       }
       return next;
     });
 
-    if (firstNewId) setActiveId(firstNewId);
+    if (latestId) setActiveId(latestId);
     setShowForm(false);
     setFormConnecting(false);
     // Clear discovery progress after a short delay to let user see the result
