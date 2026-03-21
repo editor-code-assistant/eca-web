@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { testConnection } from '../bridge/connection';
+import { probePort, testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
@@ -142,12 +142,11 @@ export function RemoteProduct() {
     await Promise.allSettled(
       ports.map(async (port) => {
         if (abort.signal.aborted) return;
-        const hostWithPort = `${host}:${port}`;
-        const error = await testConnection(hostWithPort, password, protocol);
+        const alive = await probePort(host, port, protocol);
         if (abort.signal.aborted) return;
 
         progress.checked++;
-        if (!error) progress.found.push(port);
+        if (alive) progress.found.push(port);
         setDiscovery({ ...progress, found: [...progress.found] });
       }),
     );

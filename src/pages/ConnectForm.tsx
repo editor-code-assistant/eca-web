@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Protocol } from '../bridge/utils';
 import './ConnectForm.css';
 
@@ -29,6 +29,16 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
   const [password, setPassword] = useState('');
   const [protocol, setProtocol] = useState<Protocol>('https');
   const [autoDiscover, setAutoDiscover] = useState(true);
+  const userToggledProtocol = useRef(false);
+
+  // Auto-detect HTTP for private/local network addresses
+  useEffect(() => {
+    if (userToggledProtocol.current) return;
+    const h = host.trim();
+    const isPrivate =
+      /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|127\.|localhost)/i.test(h);
+    setProtocol(isPrivate ? 'http' : 'https');
+  }, [host]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +74,7 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
               <button
                 type="button"
                 className="connect-protocol-prefix"
-                onClick={() => setProtocol((p) => (p === 'https' ? 'http' : 'https'))}
+                onClick={() => { userToggledProtocol.current = true; setProtocol((p) => (p === 'https' ? 'http' : 'https')); }}
                 disabled={isConnecting}
                 title="Click to toggle HTTP / HTTPS"
               >
@@ -155,7 +165,7 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
             </div>
             <span className="connect-discovery-status">
               {discovery.checked < discovery.total
-                ? `Scanning… ${discovery.checked}/${discovery.total} ports`
+                ? `Scanning… ${discovery.checked}/${discovery.total} ports${discovery.found.length > 0 ? ` (${discovery.found.length} found)` : ''}`
                 : discovery.found.length > 0
                   ? `Found ${discovery.found.length} server${discovery.found.length > 1 ? 's' : ''} on port${discovery.found.length > 1 ? 's' : ''} ${discovery.found.join(', ')}`
                   : 'No servers found'}

@@ -11,6 +11,33 @@ import type { Protocol } from './utils';
 import { fetchWithTimeout, resolveBaseUrl } from './utils';
 
 /**
+ * Lightweight probe to check if an ECA server is listening on a given port.
+ *
+ * Used by auto-discovery to quickly scan a port range without requiring
+ * full authentication. Uses `mode: 'no-cors'` to bypass CORS preflight
+ * issues — we only need to know "is something responding on /health?".
+ *
+ * Tries both HTTP and HTTPS in parallel to handle protocol mismatches
+ * (e.g. user selected HTTPS but server runs HTTP, or vice-versa).
+ */
+export async function probePort(
+  host: string,
+  port: number,
+  preferredProtocol: Protocol = 'http',
+): Promise<boolean> {
+  const protocols: Protocol[] =
+    preferredProtocol === 'https' ? ['https', 'http'] : ['http', 'https'];
+
+  const results = await Promise.allSettled(
+    protocols.map(async (proto) => {
+      const url = `${proto}://${host}:${port}/api/v1/health`;
+      await fetchWithTimeout(url, { mode: 'no-cors' }, 3_000);
+    }),
+  );
+  return results.some((r) => r.status === 'fulfilled');
+}
+
+/**
  * Test whether a host is reachable and the password is valid.
  *
  * Returns a human-readable error message on failure, or null on success.
