@@ -139,7 +139,7 @@ export function RemoteProduct() {
     const progress: DiscoveryProgress = { total: ports.length, checked: 0, found: [] };
     setDiscovery({ ...progress });
 
-    const results = await Promise.allSettled(
+    await Promise.allSettled(
       ports.map(async (port) => {
         if (abort.signal.aborted) return;
         const hostWithPort = `${host}:${port}`;
@@ -154,9 +154,8 @@ export function RemoteProduct() {
 
     if (abort.signal.aborted) return;
 
-    // Check results
-    const failedAll = results.every((r) => r.status === 'rejected');
-    if (failedAll || progress.found.length === 0) {
+    // Only error when zero servers were discovered
+    if (progress.found.length === 0) {
       setFormError('No ECA servers found on ports 7777–7787. Check the host and password.');
       setFormConnecting(false);
       return;
