@@ -41,6 +41,16 @@ export function AppHeader({ currentProduct, onNavigate }: AppHeaderProps) {
           </a>
         ))}
       </nav>
+
+      <a
+        href="https://eca.dev"
+        className="app-header-external"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        eca.dev
+        <i className="codicon codicon-link-external" />
+      </a>
     </header>
   );
 }

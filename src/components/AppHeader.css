@@ -76,3 +76,24 @@
   color: #00a5b8;
   border-bottom-color: #00a5b8;
 }
+
+/* External link (right-aligned) */
+.app-header-external {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #5a6a7a;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.app-header-external:hover {
+  color: #8a9ab0;
+}
+
+.app-header-external .codicon {
+  font-size: 12px;
+}

@@ -10,7 +10,7 @@
  * Supports deep-linking via `?host=...&pass=...` query params.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry } from '../bridge/types';
@@ -24,9 +24,13 @@ import {
   saveConnections,
 } from '../storage/connections';
 import { ConnectionBar, type ConnectionEntry } from './ConnectionBar';
-import { ConnectForm } from './ConnectForm';
+import { ConnectForm, type DiscoveryProgress } from './ConnectForm';
 import { RemoteSession, type SessionStatus } from './RemoteSession';
 import './RemoteProduct.css';
+
+/** Port range for auto-discovery */
+const DISCOVERY_PORT_START = 7777;
+const DISCOVERY_PORT_END = 7787;
 
 export function RemoteProduct() {
   const [entries, setEntries] = useState<ConnectionEntry[]>(() =>
@@ -40,6 +44,8 @@ export function RemoteProduct() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [discovery, setDiscovery] = useState<DiscoveryProgress | null>(null);
+  const discoveryAbortRef = useRef<AbortController | null>(null);
 
   // --- Persistence ---
 
@@ -116,6 +122,74 @@ export function RemoteProduct() {
       setFormConnecting(false);
     }
   }, [entries]);
+
+  /** Auto-discover ECA servers on ports 7777–7787 in parallel. */
+  const discoverConnections = useCallback(async (host: string, password: string, protocol?: Protocol) => {
+    // Abort any previous discovery
+    discoveryAbortRef.current?.abort();
+    const abort = new AbortController();
+    discoveryAbortRef.current = abort;
+
+    setFormConnecting(true);
+    setFormError(null);
+
+    const ports: number[] = [];
+    for (let p = DISCOVERY_PORT_START; p <= DISCOVERY_PORT_END; p++) ports.push(p);
+
+    const progress: DiscoveryProgress = { total: ports.length, checked: 0, found: [] };
+    setDiscovery({ ...progress });
+
+    const results = await Promise.allSettled(
+      ports.map(async (port) => {
+        if (abort.signal.aborted) return;
+        const hostWithPort = `${host}:${port}`;
+        const error = await testConnection(hostWithPort, password, protocol);
+        if (abort.signal.aborted) return;
+
+        progress.checked++;
+        if (!error) progress.found.push(port);
+        setDiscovery({ ...progress, found: [...progress.found] });
+      }),
+    );
+
+    if (abort.signal.aborted) return;
+
+    // Check results
+    const failedAll = results.every((r) => r.status === 'rejected');
+    if (failedAll || progress.found.length === 0) {
+      setFormError('No ECA servers found on ports 7777–7787. Check the host and password.');
+      setFormConnecting(false);
+      return;
+    }
+
+    // Create a connection entry for each found port
+    let firstNewId: string | null = null;
+    setEntries((prev) => {
+      const next = [...prev];
+      for (const port of progress.found) {
+        const hostWithPort = `${host}:${port}`;
+        const existing = next.find((e) => e.host === hostWithPort);
+        if (existing) {
+          // Update credentials if needed
+          if (existing.password !== password || existing.protocol !== protocol) {
+            Object.assign(existing, { password, protocol });
+          }
+          if (!firstNewId) firstNewId = existing.id;
+        } else {
+          const id = crypto.randomUUID();
+          next.push({ id, host: hostWithPort, password, protocol, status: 'idle' });
+          if (!firstNewId) firstNewId = id;
+        }
+      }
+      return next;
+    });
+
+    if (firstNewId) setActiveId(firstNewId);
+    setShowForm(false);
+    setFormConnecting(false);
+    // Clear discovery progress after a short delay to let user see the result
+    setTimeout(() => setDiscovery(null), 300);
+  }, []);
 
   const removeConnection = useCallback((id: string) => {
     setEntries((prev) => {
@@ -194,8 +268,10 @@ export function RemoteProduct() {
           {shouldShowForm ? (
             <ConnectForm
               onConnect={(host, password, protocol) => addConnection(host, password, protocol)}
+              onDiscover={(host, password, protocol) => discoverConnections(host, password, protocol)}
               isConnecting={formConnecting}
               error={formError}
+              discovery={discovery}
             />
           ) : (
             <RemoteSession
