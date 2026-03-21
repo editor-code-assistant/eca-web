@@ -115,24 +115,9 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
     };
   }, [connect]);
 
-  // Debug overlay — remove after debugging mobile blank page
-  const debugBanner = (
-    <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 99999,
-      background: '#1a1a2e', color: '#0f0', fontSize: '11px', padding: '6px 10px',
-      fontFamily: 'monospace', borderTop: '1px solid #333', maxHeight: '30vh', overflow: 'auto',
-    }}>
-      <div>status: <b>{state.status}</b></div>
-      <div>host: {host} | protocol: {protocol ?? 'auto'}</div>
-      {state.status === 'error' && <div style={{ color: '#f44' }}>error: {state.message}</div>}
-      <div>bridge connected: {String(bridgeRef.current?.isConnected() ?? false)}</div>
-    </div>
-  );
-
   const content = state.status === 'connected' ? (
     <div className="remote-session">
       <WebviewApp />
-      {debugBanner}
     </div>
   ) : state.status === 'error' ? (
     <div className="remote-session-status">
@@ -143,7 +128,6 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
       <button className="remote-session-retry" onClick={connect}>
         Retry
       </button>
-      {debugBanner}
     </div>
   ) : (
     <div className="remote-session-status">
@@ -151,7 +135,6 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
         <div className="remote-session-spinner" />
         <span>Connecting to {host}…</span>
       </div>
-      {debugBanner}
     </div>
   );
 

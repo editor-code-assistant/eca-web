@@ -252,16 +252,6 @@ export function RemoteProduct() {
         />
       )}
 
-      {/* DEBUG — remove after mobile investigation */}
-      <div style={{
-        background: '#ff0', color: '#000', fontSize: '13px', padding: '8px 12px',
-        fontFamily: 'monospace', fontWeight: 'bold', flexShrink: 0, zIndex: 99999,
-      }}>
-        showForm={String(shouldShowForm)} | entries={entries.length} | activeId={activeId?.slice(0, 8) ?? 'null'}
-        {activeEntry ? ` | host=${activeEntry.host} proto=${activeEntry.protocol}` : ' | NO activeEntry'}
-        {` | showForm=${String(showForm)}`}
-      </div>
-
       <div className="remote-product-body">
         {showSidebar && (
           <ChatSidebar
