@@ -116,9 +116,17 @@ export class WebBridge {
    */
   private subagentChatIds = new Set<string>();
 
-  constructor(host: string, password: string, protocol?: Protocol) {
+  /**
+   * The preferred chat ID to restore on connect. When set (e.g. from
+   * persisted storage), `restoreChats()` will select this chat instead
+   * of the most recent one — giving the user continuity across sessions.
+   */
+  private preferredChatId: string | null = null;
+
+  constructor(host: string, password: string, protocol?: Protocol, lastChatId?: string) {
     this.host = host;
     this.api = new EcaRemoteApi(host, password, protocol);
+    this.preferredChatId = lastChatId ?? null;
   }
 
   // ---------------------------------------------------------------------------
@@ -755,11 +763,15 @@ export class WebBridge {
       });
     }
 
-    // Auto-select and load the most recent chat
-    const lastChat = summaries[summaries.length - 1];
-    if (lastChat?.id) {
-      this.currentChatId = lastChat.id;
-      await this.loadChatMessages(lastChat.id);
+    // Auto-select the preferred chat (from previous session) or fall back
+    // to the most recent chat in the list.
+    const preferred = this.preferredChatId
+      ? summaries.find((s) => s.id === this.preferredChatId)
+      : null;
+    const chatToSelect = preferred ?? summaries[summaries.length - 1];
+    if (chatToSelect?.id) {
+      this.currentChatId = chatToSelect.id;
+      await this.loadChatMessages(chatToSelect.id);
     }
 
     this.notifyChatListChange();

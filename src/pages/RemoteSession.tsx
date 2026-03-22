@@ -55,12 +55,14 @@ interface RemoteSessionProps {
   host: string;
   password: string;
   protocol?: Protocol;
+  /** ID of the last viewed chat — used to restore the previous chat on reconnect. */
+  lastChatId?: string;
   onStatusChange: (status: SessionStatus, error?: string) => void;
   /** Called when the bridge instance changes (connected or disconnected). */
   onBridgeChange?: (bridge: WebBridge | null) => void;
 }
 
-export function RemoteSession({ host, password, protocol, onStatusChange, onBridgeChange }: RemoteSessionProps) {
+export function RemoteSession({ host, password, protocol, lastChatId, onStatusChange, onBridgeChange }: RemoteSessionProps) {
   const [state, setState] = useState<
     | { status: 'connecting' }
     | { status: 'connected' }
@@ -72,6 +74,8 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
 
   const bridgeRef = useRef<WebBridge | null>(null);
   const mountedRef = useRef(true);
+  const lastChatIdRef = useRef(lastChatId);
+  lastChatIdRef.current = lastChatId;
   const onStatusChangeRef = useRef(onStatusChange);
   const onBridgeChangeRef = useRef(onBridgeChange);
   onStatusChangeRef.current = onStatusChange;
@@ -85,7 +89,7 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
     // Disconnect any existing bridge
     bridgeRef.current?.disconnect();
 
-    const bridge = new WebBridge(host, password, protocol);
+    const bridge = new WebBridge(host, password, protocol, lastChatIdRef.current);
     bridgeRef.current = bridge;
 
     // Subscribe to reconnection events

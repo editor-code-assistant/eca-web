@@ -22,6 +22,8 @@ export interface ConnectionEntry {
   error?: string;
   /** Workspace folders reported by the server once the session is connected. */
   workspaceFolders?: (WorkspaceFolder | string)[];
+  /** ID of the last viewed chat — restored when reconnecting to this server. */
+  lastChatId?: string;
 }
 
 interface ConnectionBarProps {

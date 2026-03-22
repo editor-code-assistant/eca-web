@@ -52,7 +52,7 @@ export function RemoteProduct() {
   // --- Persistence ---
 
   useEffect(() => {
-    saveConnections(entries.map(({ id, host, password, protocol, workspaceFolders }) => ({ id, host, password, protocol, workspaceFolders })));
+    saveConnections(entries.map(({ id, host, password, protocol, workspaceFolders, lastChatId }) => ({ id, host, password, protocol, workspaceFolders, lastChatId })));
   }, [entries]);
 
   useEffect(() => {
@@ -270,6 +270,16 @@ export function RemoteProduct() {
       bridge.onChatListChanged((entries, selected) => {
         setChatEntries(entries);
         setSelectedChatId(selected);
+        // Persist the last viewed chat ID so it can be restored on reconnect.
+        if (connId && selected) {
+          setEntries((prev) => {
+            const entry = prev.find((e) => e.id === connId);
+            if (entry?.lastChatId === selected) return prev; // no change — keep same reference
+            return prev.map((e) =>
+              e.id === connId ? { ...e, lastChatId: selected } : e,
+            );
+          });
+        }
         // Workspace folders become available after session:connected,
         // which fires before chats are restored — so pick them up here.
         syncFolders();
@@ -334,6 +344,7 @@ export function RemoteProduct() {
               host={activeEntry.host}
               password={activeEntry.password}
               protocol={activeEntry.protocol}
+              lastChatId={activeEntry.lastChatId}
               onStatusChange={(status, error) =>
                 handleStatusChange(activeEntry.id, status, error)
               }

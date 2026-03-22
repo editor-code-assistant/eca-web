@@ -19,6 +19,8 @@ export interface Connection {
   protocol?: Protocol;
   /** Cached workspace folders from the last successful session. */
   workspaceFolders?: (WorkspaceFolder | string)[];
+  /** ID of the last viewed chat — restored when reconnecting to this server. */
+  lastChatId?: string;
 }
 
 // ---------------------------------------------------------------------------
