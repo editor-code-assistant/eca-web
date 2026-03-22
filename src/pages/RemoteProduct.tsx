@@ -271,12 +271,14 @@ export function RemoteProduct() {
         setChatEntries(entries);
         setSelectedChatId(selected);
         // Persist the last viewed chat ID so it can be restored on reconnect.
-        if (connId && selected) {
+        // When selected is null (all chats failed to load), clear the stale
+        // lastChatId so it doesn't keep 404-ing on every subsequent connect.
+        if (connId) {
           setEntries((prev) => {
             const entry = prev.find((e) => e.id === connId);
-            if (entry?.lastChatId === selected) return prev; // no change — keep same reference
+            if ((entry?.lastChatId ?? null) === (selected ?? null)) return prev;
             return prev.map((e) =>
-              e.id === connId ? { ...e, lastChatId: selected } : e,
+              e.id === connId ? { ...e, lastChatId: selected ?? undefined } : e,
             );
           });
         }

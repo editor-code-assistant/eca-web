@@ -26,7 +26,7 @@ export interface OutboundContext {
   /** Triggers initial state dispatch (called on webview/ready). */
   dispatchInitialState: () => Promise<void>;
   /** Lazy-load messages for a chat (fetches from server if not yet loaded). */
-  loadChatMessages: (chatId: string) => Promise<void>;
+  loadChatMessages: (chatId: string) => Promise<boolean>;
 }
 
 /**

@@ -763,15 +763,44 @@ export class WebBridge {
       });
     }
 
-    // Auto-select the preferred chat (from previous session) or fall back
-    // to the most recent chat in the list.
+    // Build a priority-ordered list of chats to try loading.
+    // Preferred (from previous session) comes first, then most-recent-first.
+    const candidates: ChatSummary[] = [];
     const preferred = this.preferredChatId
       ? summaries.find((s) => s.id === this.preferredChatId)
       : null;
-    const chatToSelect = preferred ?? summaries[summaries.length - 1];
-    if (chatToSelect?.id) {
-      this.currentChatId = chatToSelect.id;
-      await this.loadChatMessages(chatToSelect.id);
+    if (preferred) candidates.push(preferred);
+    // Add remaining summaries in reverse order (most recent first), skipping preferred.
+    for (let i = summaries.length - 1; i >= 0; i--) {
+      if (summaries[i].id !== preferred?.id) {
+        candidates.push(summaries[i]);
+      }
+    }
+
+    // Try each candidate until one loads successfully.
+    let loaded = false;
+    for (const candidate of candidates) {
+      if (!candidate?.id) continue;
+      this.currentChatId = candidate.id;
+      if (await this.loadChatMessages(candidate.id)) {
+        // Clear stale preferred if we had to fall back to a different chat.
+        if (preferred && candidate.id !== preferred.id) {
+          console.log(`[Bridge] Preferred chat ${this.preferredChatId} no longer exists, fell back to ${candidate.id}`);
+          this.preferredChatId = null;
+        }
+        loaded = true;
+        break;
+      }
+      // Chat doesn't exist on the server — remove its stale sidebar entry.
+      console.warn(`[Bridge] Chat ${candidate.id} failed to load, removing from sidebar`);
+      this.removeChatEntry(candidate.id);
+    }
+
+    // If nothing loaded, clear stale preferred and reset current chat so
+    // the webview shows a clean welcome screen instead of a ghost entry.
+    if (!loaded) {
+      this.currentChatId = null;
+      this.preferredChatId = null;
     }
 
     this.notifyChatListChange();
@@ -787,9 +816,12 @@ export class WebBridge {
    *
    * Called automatically on initial connect (for the most recent chat)
    * and on demand when the user switches chats.
+   *
+   * @returns `true` if the chat was successfully loaded (or was already loaded),
+   *          `false` if loading failed (e.g. chat deleted, server error).
    */
-  async loadChatMessages(chatId: string): Promise<void> {
-    if (this.loadedChatIds.has(chatId)) return;
+  async loadChatMessages(chatId: string): Promise<boolean> {
+    if (this.loadedChatIds.has(chatId)) return true;
 
     try {
       console.log(`[Bridge] Loading messages for chat ${chatId}`);
@@ -803,7 +835,7 @@ export class WebBridge {
       } else {
         // Cache miss — fetch from server with one retry on failure
         chat = await this.fetchChatWithRetry(chatId);
-        if (!chat) return; // Both attempts failed
+        if (!chat) return false; // Both attempts failed
 
         // Populate cache for future use
         messageCache.set(this.host, chatId, chat);
@@ -838,19 +870,27 @@ export class WebBridge {
       this.dispatch('chat/batchContentReceived', events);
 
       console.log(`[Bridge] Restored ${chat?.messages?.length ?? 0} message(s) for chat ${chatId}`);
+      return true;
     } catch (err) {
       console.error(`[Bridge] Failed to load messages for chat ${chatId}:`, err);
+      return false;
     }
   }
 
   /**
-   * Fetch a chat from the REST API with a single retry on failure.
-   * Returns null if both attempts fail.
+   * Fetch a chat from the REST API with a single retry on transient failures.
+   * Does NOT retry on "does not exist" errors (404) — the chat is gone.
+   * Returns null if the fetch ultimately fails.
    */
   private async fetchChatWithRetry(chatId: string): Promise<import('./types').RemoteChat | null> {
     try {
       return await this.api.getChat(chatId);
-    } catch (err) {
+    } catch (err: any) {
+      // Don't retry on 404 — the chat is definitively gone
+      if (err?.message?.includes('does not exist')) {
+        console.warn(`[Bridge] Chat ${chatId} does not exist on the server`);
+        return null;
+      }
       console.warn(`[Bridge] First fetch failed for chat ${chatId}, retrying...`, err);
       try {
         return await this.api.getChat(chatId);
