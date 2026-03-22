@@ -8,57 +8,17 @@
  */
 
 import type { Protocol } from './utils';
-import { fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl } from './utils';
-
-/**
- * Pre-request Chrome's Local Network Access (LNA) permission for a host.
- *
- * When `https://web.eca.dev` fetches a private IP, Chrome gates the
- * request behind a user permission prompt. This function triggers that
- * prompt **once** before port scanning so that all subsequent probes
- * succeed without blocking on user interaction.
- *
- * For non-local hosts this is a no-op.
- *
- * @returns true if the host is non-local or the LNA permission was granted.
- */
-export async function requestLocalNetworkAccess(
-  host: string,
-  protocol: Protocol = 'http',
-): Promise<boolean> {
-  if (!isLocalNetworkHost(host)) return true;
-
-  try {
-    // Fire a single throwaway fetch to trigger the LNA prompt.
-    // We use port 7777 (first discovery port) — the server may or may
-    // not be there, but the prompt still fires for the hostname.
-    // 30s timeout: user needs time to read and click "Allow".
-    await fetchWithTimeout(
-      `${protocol}://${host}:7777/api/v1/health`,
-      undefined,
-      30_000,
-    );
-    return true;
-  } catch {
-    // Even if this fetch fails (e.g. nothing on port 7777), the LNA
-    // permission may still have been granted for the origin — Chrome
-    // remembers the grant regardless of the HTTP outcome.
-    return true;
-  }
-}
+import { fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl, resolveProtocol } from './utils';
 
 /**
  * Lightweight probe to check if an ECA server is listening on a given port.
  *
  * Used by auto-discovery to quickly scan a port range without requiring
- * full authentication.
+ * full authentication. Uses `mode: 'no-cors'` so we only need to know
+ * "is something responding?" — the opaque response is fine for discovery.
  *
  * Tries both HTTP and HTTPS in parallel to handle protocol mismatches
  * (e.g. user selected HTTPS but server runs HTTP, or vice-versa).
- *
- * NOTE: Call {@link requestLocalNetworkAccess} once before scanning
- * so that Chrome's LNA permission is already granted and these fast
- * probes aren't blocked by the permission prompt.
  */
 export async function probePort(
   host: string,
@@ -71,11 +31,22 @@ export async function probePort(
   const results = await Promise.allSettled(
     protocols.map(async (proto) => {
       const url = `${proto}://${host}:${port}/api/v1/health`;
-      await fetchWithTimeout(url, undefined, 3_000);
+      await fetchWithTimeout(url, { mode: 'no-cors' }, 3_000);
     }),
   );
   return results.some((r) => r.status === 'fulfilled');
 }
+
+/** True when the page is served over HTTPS and the target is plain HTTP on a private IP. */
+function isMixedContentScenario(host: string, protocol?: Protocol): boolean {
+  return globalThis.location?.protocol === 'https:'
+    && resolveProtocol(host, protocol) === 'http'
+    && isLocalNetworkHost(host);
+}
+
+const MIXED_CONTENT_HINT =
+  'Your browser may be blocking this request (HTTPS → HTTP on a private network). '
+  + 'Check that you\'ve allowed Local Network Access for this site in your browser settings.';
 
 /**
  * Test whether a host is reachable and the password is valid.
@@ -87,6 +58,7 @@ export async function probePort(
  */
 export async function testConnection(host: string, password: string, protocol?: Protocol): Promise<string | null> {
   const baseUrl = resolveBaseUrl(host, protocol);
+  const mixedContent = isMixedContentScenario(host, protocol);
 
   // 1. Test host reachability (health endpoint — no auth)
   try {
@@ -98,9 +70,13 @@ export async function testConnection(host: string, password: string, protocol?: 
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      return 'Connection timed out. Check the address and try again.';
+      return mixedContent
+        ? `Connection timed out. ${MIXED_CONTENT_HINT}`
+        : 'Connection timed out. Check the address and try again.';
     }
-    return 'Could not reach host. Check the address and try again.';
+    return mixedContent
+      ? `Could not reach host. ${MIXED_CONTENT_HINT}`
+      : 'Could not reach host. Check the address and try again.';
   }
 
   // 2. Test authentication (session endpoint — requires auth)
