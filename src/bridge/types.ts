@@ -302,6 +302,8 @@ export interface ReconnectionState {
   attempt: number;
   /** Milliseconds until the next retry (only while status === 'reconnecting'). */
   nextRetryMs?: number;
+  /** Callback to manually trigger a reconnection attempt (available when status is 'reconnecting' or 'failed'). */
+  retryNow?: () => void;
 }
 
 /** Callback signature for reconnection state changes. */

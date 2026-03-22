@@ -181,15 +181,15 @@ export async function handleOutbound(
 
 /**
  * Handle a user prompt: creates a new chat if no chatId is provided.
- * Ensures the chat messages are loaded before sending (handles the case
- * where a prompt targets a chat whose history hasn't been lazy-loaded yet).
+ *
+ * The server has full chat context — there's no need to re-fetch or
+ * re-load messages before sending. Doing so would risk dispatching
+ * `chat/cleared` on the visible chat (clearing all messages) if the
+ * chat wasn't in `loadedChatIds` (e.g. after a reconnect re-sync).
  */
 async function handleUserPrompt(data: UserPromptData, ctx: OutboundContext): Promise<void> {
   const chatId = data.chatId || crypto.randomUUID();
   ctx.setCurrentChatId(chatId);
-
-  // Ensure messages are loaded so the webview has full context
-  await ctx.loadChatMessages(chatId);
 
   await ctx.api.sendPrompt(chatId, {
     message: data.prompt,

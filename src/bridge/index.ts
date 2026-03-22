@@ -12,7 +12,9 @@
 
 export { EcaRemoteApi } from './api';
 export { testConnection } from './connection';
+export { messageCache, MessageCache } from './message-cache';
 export { SSEClient } from './sse';
 export { WebBridge } from './transport';
+export type { CachedChat } from './message-cache';
 export type { SSEEvent, SSEClientOptions } from './sse';
 export type * from './types';

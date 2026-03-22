@@ -19,6 +19,7 @@
 
 import { EcaRemoteApi } from './api';
 import { chatToRestoreEvents } from './chat-restore';
+import { messageCache } from './message-cache';
 import { handleOutbound, type OutboundContext } from './outbound-handler';
 import { SSEClient, type SSEEvent } from './sse';
 import type { Protocol } from './utils';
@@ -45,9 +46,12 @@ const SSE_CONNECT_TIMEOUT_MS = 15_000;
 const RECONNECT_BASE_DELAY_MS = 1_000;
 /** Maximum delay between reconnection attempts. */
 const RECONNECT_MAX_DELAY_MS = 15_000;
+/** Maximum number of reconnection attempts before giving up (~5 min with backoff). */
+const MAX_RECONNECT_ATTEMPTS = 30;
 
 export class WebBridge {
   private api: EcaRemoteApi;
+  private host: string;
   private sse: SSEClient | null = null;
   private sessionState: SessionState | null = null;
   private connected = false;
@@ -113,6 +117,7 @@ export class WebBridge {
   private subagentChatIds = new Set<string>();
 
   constructor(host: string, password: string, protocol?: Protocol) {
+    this.host = host;
     this.api = new EcaRemoteApi(host, password, protocol);
   }
 
@@ -188,6 +193,18 @@ export class WebBridge {
       return;
     }
 
+    // Give up after too many attempts
+    if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn(`[Bridge] Giving up after ${this.reconnectAttempt} reconnect attempts`);
+      this.reconnecting = false;
+      this.notifyReconnection({
+        status: 'failed',
+        attempt: this.reconnectAttempt,
+        retryNow: () => this.retryNow(),
+      });
+      return;
+    }
+
     this.reconnectAttempt++;
     const delay = Math.min(
       RECONNECT_BASE_DELAY_MS * Math.pow(2, this.reconnectAttempt - 1),
@@ -202,6 +219,7 @@ export class WebBridge {
       status: 'reconnecting',
       attempt: this.reconnectAttempt,
       nextRetryMs: delay,
+      retryNow: () => this.retryNow(),
     });
 
     this.reconnectTimer = setTimeout(async () => {
@@ -241,6 +259,24 @@ export class WebBridge {
   }
 
   /**
+   * Manually trigger a reconnection attempt (e.g. from a "Retry Now" button).
+   * Resets the attempt counter and starts a fresh reconnection cycle.
+   */
+  retryNow(): void {
+    if (this.disposed) return;
+
+    // Clear any pending scheduled retry
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.reconnectAttempt = 0;
+    this.reconnecting = true;
+    this.attemptReconnect();
+  }
+
+  /**
    * Re-open the SSE stream (without the full connect() ceremony).
    * Rejects if the handshake times out or the connection fails.
    */
@@ -276,10 +312,13 @@ export class WebBridge {
           }
         },
         () => {
-          console.warn('[Bridge] SSE disconnected');
+          console.warn('[Bridge] SSE disconnected (reconnect path)');
           this.connected = false;
-          this.dispatch('server/statusChanged', 'Stopped');
-          this.scheduleReconnect();
+          // Don't dispatch 'Stopped' here — preserve chat state in the webview.
+          // The reconnection overlay communicates connection status to the user.
+          if (!this.disposed) {
+            this.scheduleReconnect();
+          }
         },
       );
 
@@ -291,8 +330,12 @@ export class WebBridge {
   }
 
   /**
-   * After a successful reconnect, refresh session config and re-dispatch
-   * a "Running" status so the webview knows the server is back.
+   * After a successful reconnect, refresh session config, re-sync chats,
+   * and re-dispatch a "Running" status so the webview knows the server is back.
+   *
+   * Unlike the initial `dispatchInitialState()`, this does NOT reset the
+   * webview entirely — it preserves the current chat view and incrementally
+   * updates it with the latest server state.
    */
   private async syncAfterReconnect(): Promise<void> {
     if (!this.sessionState) return;
@@ -309,7 +352,24 @@ export class WebBridge {
       this.dispatch('tool/serversUpdated', this.mcpServers);
     }
     this.dispatch('server/setTrust', this.sessionState.trust ?? false);
+
+    // Ensure the webview knows the server is running before we re-sync chats,
+    // so the UI is responsive while messages are being restored.
     this.dispatch('server/statusChanged', 'Running');
+
+    // Re-sync chats: clear loaded state so chats are re-fetched with latest
+    // server data. Messages that arrived during the disconnect gap will be
+    // picked up by the REST fetch. The restoring flag prevents live SSE events
+    // from racing with the restore.
+    this.restoring = true;
+    try {
+      this.loadedChatIds.clear();
+      await this.restoreChats();
+    } catch (err) {
+      console.error('[Bridge] Failed to re-sync chats after reconnect:', err);
+    } finally {
+      this.restoring = false;
+    }
   }
 
   private notifyReconnection(state: ReconnectionState): void {
@@ -364,6 +424,13 @@ export class WebBridge {
       // auto-creates the chat in Redux and sets it as selectedChat, so we
       // don't need a separate selectChat dispatch (which would race).
       await this.loadChatMessages(chatId);
+
+      // If loading failed (server error, network issue), still switch to the
+      // chat so the sidebar selection stays consistent. The webview will show
+      // the chat even if empty, and a future retry can populate it.
+      if (!this.loadedChatIds.has(chatId)) {
+        this.dispatch('chat/selectChat', chatId);
+      }
     }
 
     this.notifyChatListChange();
@@ -422,11 +489,16 @@ export class WebBridge {
         () => {
           console.warn('[Bridge] SSE disconnected');
           this.connected = false;
-          this.dispatch('server/statusChanged', 'Stopped');
 
-          // Auto-reconnect if this was a previously-established connection
+          // Auto-reconnect if this was a previously-established connection.
+          // Don't dispatch 'Stopped' during reconnection — this preserves the
+          // webview's chat state (the 'Stopped' status clears all chats in Redux).
+          // The reconnection overlay communicates the connection status to the user.
           if (this.hasConnectedOnce && !this.disposed) {
             this.scheduleReconnect();
+          } else {
+            // Terminal disconnect (initial failure or disposed) — clear state
+            this.dispatch('server/statusChanged', 'Stopped');
           }
         },
       );
@@ -491,18 +563,26 @@ export class WebBridge {
               this.upsertChatEntry(data.chatId, { title: data.content.title });
             }
             this.notifyChatListChange();
+
+            // Keep the message cache incrementally updated so that reconnects
+            // and tab switches can restore from cache without a full REST fetch.
+            // We invalidate the cache entry so the next load gets fresh data,
+            // since SSE events don't carry the full StoredMessage format.
+            messageCache.invalidate(this.host, data.chatId);
           }
           break;
 
         case 'chat:cleared':
           this.dispatch('chat/cleared', { chatId: data.chatId, messages: true });
           this.loadedChatIds.delete(data.chatId);
+          messageCache.invalidate(this.host, data.chatId);
           break;
 
         case 'chat:deleted':
           this.dispatch('chat/deleted', data.chatId);
           this.removeChatEntry(data.chatId);
           this.loadedChatIds.delete(data.chatId);
+          messageCache.invalidate(this.host, data.chatId);
           this.notifyChatListChange();
           break;
 
@@ -585,12 +665,13 @@ export class WebBridge {
       // Sync trust mode from server state
       this.dispatch('server/setTrust', this.sessionState.trust ?? false);
 
-      // Load chat summaries + most recent chat messages BEFORE marking
-      // the server as running — the webview renders the Chat component
-      // once it sees "Running", so chats must be populated first.
-      await this.restoreChats();
-
+      // Mark the server as running BEFORE restoring chats so the webview
+      // renders the chat UI immediately. Messages will populate into the
+      // already-visible interface — much better UX than blocking on
+      // "Waiting for server to start" during a multi-second restore.
       this.dispatch('server/statusChanged', 'Running');
+
+      await this.restoreChats();
     } finally {
       this.restoring = false;
     }
@@ -688,6 +769,10 @@ export class WebBridge {
    * Lazy-load a single chat's messages from the server and dispatch them
    * to the webview. Skips if the chat was already loaded.
    *
+   * Performance: checks the in-memory message cache first to avoid a REST
+   * round-trip (e.g. on tab switch or reconnection). Falls back to REST
+   * on cache miss, and populates the cache on success.
+   *
    * Called automatically on initial connect (for the most recent chat)
    * and on demand when the user switches chats.
    */
@@ -696,12 +781,29 @@ export class WebBridge {
 
     try {
       console.log(`[Bridge] Loading messages for chat ${chatId}`);
-      const chat = await this.api.getChat(chatId);
+
+      // Try cache first — instant restore without network
+      const cached = messageCache.get(this.host, chatId);
+      let chat = cached?.chat ?? null;
+
+      if (chat) {
+        console.log(`[Bridge] Cache hit for chat ${chatId} (${chat.messages?.length ?? 0} msgs)`);
+      } else {
+        // Cache miss — fetch from server with one retry on failure
+        chat = await this.fetchChatWithRetry(chatId);
+        if (!chat) return; // Both attempts failed
+
+        // Populate cache for future use
+        messageCache.set(this.host, chatId, chat);
+      }
+
       this.loadedChatIds.add(chatId);
 
       // Clear any partial content the webview may already have from live SSE
       // events (e.g. a running chat that streamed new content before the user
-      // clicked on it). This prevents duplicates when we replay the full history.
+      // clicked on it), or stale content from a previous session (reconnect).
+      // This prevents duplicates when we replay the full history.
+      // Safe for non-existent chats — the reducer no-ops via an existence guard.
       this.dispatch('chat/cleared', { chatId, messages: true });
 
       const events = chatToRestoreEvents(chat);
@@ -717,13 +819,33 @@ export class WebBridge {
         });
       }
 
-      for (const event of events) {
-        this.dispatch('chat/contentReceived', event);
-      }
+      // Batch-dispatch all events in a single postMessage → single Redux
+      // dispatch → single Immer draft → single React render. This is orders
+      // of magnitude faster than dispatching each event individually (which
+      // would cause N separate Immer drafts and N React renders).
+      this.dispatch('chat/batchContentReceived', events);
 
-      console.log(`[Bridge] Loaded ${chat?.messages?.length ?? 0} message(s) for chat ${chatId}`);
+      console.log(`[Bridge] Restored ${chat?.messages?.length ?? 0} message(s) for chat ${chatId}`);
     } catch (err) {
       console.error(`[Bridge] Failed to load messages for chat ${chatId}:`, err);
+    }
+  }
+
+  /**
+   * Fetch a chat from the REST API with a single retry on failure.
+   * Returns null if both attempts fail.
+   */
+  private async fetchChatWithRetry(chatId: string): Promise<import('./types').RemoteChat | null> {
+    try {
+      return await this.api.getChat(chatId);
+    } catch (err) {
+      console.warn(`[Bridge] First fetch failed for chat ${chatId}, retrying...`, err);
+      try {
+        return await this.api.getChat(chatId);
+      } catch (retryErr) {
+        console.error(`[Bridge] Retry also failed for chat ${chatId}:`, retryErr);
+        return null;
+      }
     }
   }
 

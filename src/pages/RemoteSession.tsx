@@ -101,6 +101,9 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
         setTimeout(() => {
           if (mountedRef.current) setReconnection(null);
         }, 1500);
+      } else if (rs.status === 'failed') {
+        setReconnection(rs);
+        onStatusChangeRef.current('reconnecting');
       }
     });
 
@@ -136,15 +139,15 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
     };
   }, [connect]);
 
-  // --- Connected state (with optional reconnecting overlay) ---
+  // --- Connected state (with optional reconnection banner) ---
   if (state.status === 'connected') {
     return (
       <SessionErrorBoundary>
         <div className="remote-session">
-          <WebviewApp />
           {reconnection && (
-            <ReconnectionOverlay state={reconnection} />
+            <ReconnectionBanner state={reconnection} />
           )}
+          <WebviewApp />
         </div>
       </SessionErrorBoundary>
     );
@@ -181,33 +184,47 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
 }
 
 // ---------------------------------------------------------------------------
-// Reconnection overlay (shown on top of the webview)
+// Reconnection banner (slim bar at top — chat stays fully visible)
 // ---------------------------------------------------------------------------
 
-function ReconnectionOverlay({ state }: { state: ReconnectionState }) {
-  const isReconnected = state.status === 'reconnected';
+function ReconnectionBanner({ state }: { state: ReconnectionState }) {
+  if (state.status === 'reconnected') {
+    return (
+      <div className="reconnect-banner reconnect-banner--success">
+        <i className="codicon codicon-check reconnect-banner__icon--success" />
+        <span className="reconnect-banner__text">Reconnected</span>
+      </div>
+    );
+  }
 
-  return (
-    <div className={`reconnect-overlay ${isReconnected ? 'reconnect-overlay-success' : ''}`}>
-      <div className="reconnect-overlay-content">
-        {isReconnected ? (
-          <>
-            <i className="codicon codicon-check reconnect-icon-success" />
-            <span className="reconnect-text">Reconnected</span>
-          </>
-        ) : (
-          <>
-            <div className="reconnect-spinner" />
-            <div className="reconnect-info">
-              <span className="reconnect-text">Connection lost — reconnecting…</span>
-              <span className="reconnect-detail">
-                Attempt {state.attempt}
-                {state.nextRetryMs ? ` · retrying in ${Math.ceil(state.nextRetryMs / 1000)}s` : ''}
-              </span>
-            </div>
-          </>
+  if (state.status === 'failed') {
+    return (
+      <div className="reconnect-banner reconnect-banner--failed">
+        <i className="codicon codicon-warning reconnect-banner__icon--failed" />
+        <span className="reconnect-banner__text">Unable to reconnect</span>
+        {state.retryNow && (
+          <button className="reconnect-banner__btn" onClick={state.retryNow}>
+            Retry
+          </button>
         )}
       </div>
+    );
+  }
+
+  // --- Reconnecting ---
+  return (
+    <div className="reconnect-banner reconnect-banner--reconnecting">
+      <div className="reconnect-banner__spinner" />
+      <span className="reconnect-banner__text">
+        Connection lost · Reconnecting
+        {state.attempt > 1 ? ` (attempt ${state.attempt})` : ''}
+        {state.nextRetryMs ? ` · ${Math.ceil(state.nextRetryMs / 1000)}s` : '…'}
+      </span>
+      {state.retryNow && (
+        <button className="reconnect-banner__btn" onClick={state.retryNow}>
+          Retry Now
+        </button>
+      )}
     </div>
   );
 }
