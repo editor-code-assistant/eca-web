@@ -4,42 +4,58 @@
   <title>LNA / Mixed Content Test</title>
   <style>
     body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
-    h2 { color: #569cd6; }
-    .test { margin: 8px 0; padding: 8px; border-radius: 4px; }
+    h2 { color: #569cd6; margin-top: 24px; }
+    .test { margin: 6px 0; padding: 8px; border-radius: 4px; }
     .pass { background: #1e3a1e; color: #4ec94e; }
     .fail { background: #3a1e1e; color: #e94e4e; }
     .wait { background: #3a3a1e; color: #e9e94e; }
-    input, button { font-family: monospace; font-size: 14px; padding: 6px 12px; }
-    button { cursor: pointer; background: #569cd6; color: #1e1e1e; border: none; border-radius: 4px; }
+    input, button, select { font-family: monospace; font-size: 14px; padding: 6px 12px; }
+    button { cursor: pointer; background: #569cd6; color: #1e1e1e; border: none; border-radius: 4px; margin: 4px; }
     #results { margin-top: 20px; }
     .info { color: #888; font-size: 12px; }
+    .section { margin-top: 16px; padding-top: 8px; border-top: 1px solid #444; }
   </style>
 </head>
 <body>
   <h2>Chrome LNA / Mixed Content Integration Test</h2>
   <p class="info">
     Page protocol: <strong id="pageProto"></strong> |
-    Chrome version: <strong id="chromeVer"></strong>
+    Chrome: <strong id="chromeVer"></strong> |
+    Secure context: <strong id="secureCtx"></strong>
   </p>
 
-  <label>Target: <input id="target" value="http://192.168.15.17:7780/api/v1/health" size="60"></label>
-  <button onclick="runAll()">Run All Tests</button>
+  <div>
+    <label>Host: <input id="host" value="192.168.15.17" size="20"></label>
+    <label>Port: <input id="port" value="7780" size="6"></label>
+    <label>Path: <input id="path" value="/api/v1/health" size="25"></label>
+  </div>
+  <div style="margin-top: 8px;">
+    <button onclick="runAll()">▶ Run All Tests</button>
+    <button onclick="results.innerHTML=''">Clear</button>
+  </div>
 
   <div id="results"></div>
 
   <script>
     document.getElementById('pageProto').textContent = location.protocol;
-    const match = navigator.userAgent.match(/Chrome\/(\d+)/);
-    document.getElementById('chromeVer').textContent = match ? match[1] : 'unknown';
+    const m = navigator.userAgent.match(/Chrome\/(\d+)/);
+    document.getElementById('chromeVer').textContent = m ? m[1] : 'N/A';
+    document.getElementById('secureCtx').textContent = String(window.isSecureContext);
 
     const results = document.getElementById('results');
 
-    function log(id, status, msg) {
-      const el = document.getElementById(id);
-      if (el) {
-        el.className = 'test ' + status;
-        el.textContent = `[${status.toUpperCase()}] ${el.dataset.label}: ${msg}`;
-      }
+    function getUrl(proto) {
+      const h = document.getElementById('host').value;
+      const p = document.getElementById('port').value;
+      const path = document.getElementById('path').value;
+      return `${proto}://${h}:${p}${path}`;
+    }
+
+    function addSection(title) {
+      const div = document.createElement('div');
+      div.className = 'section';
+      div.innerHTML = `<strong style="color:#569cd6">${title}</strong>`;
+      results.appendChild(div);
     }
 
     function addTest(id, label) {
@@ -47,70 +63,61 @@
       div.id = id;
       div.dataset.label = label;
       div.className = 'test wait';
-      div.textContent = `[WAIT] ${label}: running...`;
+      div.textContent = `⏳ ${label}`;
       results.appendChild(div);
     }
 
-    async function runTest(id, label, url, init) {
+    function log(id, ok, msg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.className = 'test ' + (ok ? 'pass' : 'fail');
+      el.textContent = `${ok ? '✅' : '❌'} ${el.dataset.label}: ${msg}`;
+    }
+
+    async function test(id, label, url, init, timeoutMs = 8000) {
       addTest(id, label);
-      const opts = JSON.stringify(init || {});
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const optsStr = init ? JSON.stringify(init) : '{}';
       try {
-        const start = performance.now();
-        const res = await fetch(url, init);
-        const ms = Math.round(performance.now() - start);
+        const t0 = performance.now();
+        const res = await fetch(url, { ...init, signal: ctrl.signal });
+        const ms = Math.round(performance.now() - t0);
+        clearTimeout(timer);
         if (res.type === 'opaque') {
-          log(id, 'pass', `opaque response (no-cors) — ${ms}ms | opts: ${opts}`);
+          log(id, true, `opaque (no-cors OK) ${ms}ms — ${optsStr}`);
         } else {
-          const body = await res.text().catch(() => '');
-          log(id, 'pass', `${res.status} ${res.statusText} — ${ms}ms | body: ${body.slice(0,100)} | opts: ${opts}`);
+          const txt = await res.text().catch(() => '');
+          log(id, true, `${res.status} ${ms}ms — body: ${txt.slice(0,80)} — ${optsStr}`);
         }
       } catch (err) {
-        log(id, 'fail', `${err.name}: ${err.message} | opts: ${opts}`);
+        clearTimeout(timer);
+        const kind = err.name === 'AbortError' ? 'TIMEOUT' : err.name;
+        log(id, false, `${kind}: ${err.message} — ${optsStr}`);
       }
     }
 
     async function runAll() {
       results.innerHTML = '';
-      const url = document.getElementById('target').value;
+      const httpUrl = getUrl('http');
+      const httpsUrl = getUrl('https');
 
-      // Parse URL to build HTTPS variant
-      let httpsUrl;
-      try {
-        const u = new URL(url);
-        u.protocol = 'https:';
-        httpsUrl = u.toString();
-      } catch { httpsUrl = url.replace('http://', 'https://'); }
+      // --- Section 1: HTTP target ---
+      addSection(`HTTP target: ${httpUrl}`);
+      await test('h1', 'Plain fetch', httpUrl);
+      await test('h2', 'mode: no-cors', httpUrl, { mode: 'no-cors' });
+      await test('h3', 'targetAddressSpace: private', httpUrl, { targetAddressSpace: 'private' });
+      await test('h4', 'targetAddressSpace: local', httpUrl, { targetAddressSpace: 'local' });
+      await test('h5', 'no-cors + targetAddressSpace: private', httpUrl, { mode: 'no-cors', targetAddressSpace: 'private' });
 
-      // Test 1: Plain fetch (no options)
-      await runTest('t1', 'Plain fetch (no options)', url);
+      // --- Section 2: HTTPS target ---
+      addSection(`HTTPS target: ${httpsUrl}`);
+      await test('s1', 'Plain fetch', httpsUrl);
+      await test('s2', 'mode: no-cors', httpsUrl, { mode: 'no-cors' });
+      await test('s3', 'targetAddressSpace: private', httpsUrl, { targetAddressSpace: 'private' });
 
-      // Test 2: mode: no-cors
-      await runTest('t2', 'mode: no-cors', url, { mode: 'no-cors' });
-
-      // Test 3: targetAddressSpace: private
-      await runTest('t3', 'targetAddressSpace: private', url, { targetAddressSpace: 'private' });
-
-      // Test 4: targetAddressSpace: local
-      await runTest('t4', 'targetAddressSpace: local', url, { targetAddressSpace: 'local' });
-
-      // Test 5: no-cors + targetAddressSpace: private
-      await runTest('t5', 'no-cors + targetAddressSpace: private', url, { mode: 'no-cors', targetAddressSpace: 'private' });
-
-      // Test 6: no-cors + targetAddressSpace: local
-      await runTest('t6', 'no-cors + targetAddressSpace: local', url, { mode: 'no-cors', targetAddressSpace: 'local' });
-
-      // Test 7: HTTPS variant (plain)
-      await runTest('t7', 'HTTPS variant (plain fetch)', httpsUrl);
-
-      // Test 8: HTTPS + no-cors
-      await runTest('t8', 'HTTPS variant + no-cors', httpsUrl, { mode: 'no-cors' });
-
-      // Summary
-      const summary = document.createElement('div');
-      summary.style.marginTop = '20px';
-      summary.style.color = '#569cd6';
-      summary.innerHTML = '<h2>Done — check DevTools console for additional warnings/errors</h2>';
-      results.appendChild(summary);
+      // --- Summary ---
+      addSection('Done — also check DevTools Console tab for mixed content / CORS warnings');
     }
   </script>
 </body>
