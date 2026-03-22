@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { probePort, testConnection } from '../bridge/connection';
+import { probePort, requestLocalNetworkAccess, testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry, WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
@@ -136,6 +136,11 @@ export function RemoteProduct() {
 
     const ports: number[] = [];
     for (let p = DISCOVERY_PORT_START; p <= DISCOVERY_PORT_END; p++) ports.push(p);
+
+    // On local networks, trigger Chrome's LNA permission prompt before
+    // scanning so the user can grant access without racing the 3s probe timeouts.
+    await requestLocalNetworkAccess(host, protocol);
+    if (abort.signal.aborted) return;
 
     const progress: DiscoveryProgress = { total: ports.length, checked: 0, found: [] };
     setDiscovery({ ...progress });

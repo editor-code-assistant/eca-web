@@ -8,17 +8,57 @@
  */
 
 import type { Protocol } from './utils';
-import { fetchWithTimeout, resolveBaseUrl } from './utils';
+import { fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl } from './utils';
+
+/**
+ * Pre-request Chrome's Local Network Access (LNA) permission for a host.
+ *
+ * When `https://web.eca.dev` fetches a private IP, Chrome gates the
+ * request behind a user permission prompt. This function triggers that
+ * prompt **once** before port scanning so that all subsequent probes
+ * succeed without blocking on user interaction.
+ *
+ * For non-local hosts this is a no-op.
+ *
+ * @returns true if the host is non-local or the LNA permission was granted.
+ */
+export async function requestLocalNetworkAccess(
+  host: string,
+  protocol: Protocol = 'http',
+): Promise<boolean> {
+  if (!isLocalNetworkHost(host)) return true;
+
+  try {
+    // Fire a single throwaway fetch to trigger the LNA prompt.
+    // We use port 7777 (first discovery port) — the server may or may
+    // not be there, but the prompt still fires for the hostname.
+    // 30s timeout: user needs time to read and click "Allow".
+    await fetchWithTimeout(
+      `${protocol}://${host}:7777/api/v1/health`,
+      undefined,
+      30_000,
+    );
+    return true;
+  } catch {
+    // Even if this fetch fails (e.g. nothing on port 7777), the LNA
+    // permission may still have been granted for the origin — Chrome
+    // remembers the grant regardless of the HTTP outcome.
+    return true;
+  }
+}
 
 /**
  * Lightweight probe to check if an ECA server is listening on a given port.
  *
  * Used by auto-discovery to quickly scan a port range without requiring
- * full authentication. Uses `mode: 'no-cors'` to bypass CORS preflight
- * issues — we only need to know "is something responding on /health?".
+ * full authentication.
  *
  * Tries both HTTP and HTTPS in parallel to handle protocol mismatches
  * (e.g. user selected HTTPS but server runs HTTP, or vice-versa).
+ *
+ * NOTE: Call {@link requestLocalNetworkAccess} once before scanning
+ * so that Chrome's LNA permission is already granted and these fast
+ * probes aren't blocked by the permission prompt.
  */
 export async function probePort(
   host: string,
@@ -31,7 +71,7 @@ export async function probePort(
   const results = await Promise.allSettled(
     protocols.map(async (proto) => {
       const url = `${proto}://${host}:${port}/api/v1/health`;
-      await fetchWithTimeout(url, { mode: 'no-cors' }, 3_000);
+      await fetchWithTimeout(url, undefined, 3_000);
     }),
   );
   return results.some((r) => r.status === 'fulfilled');
