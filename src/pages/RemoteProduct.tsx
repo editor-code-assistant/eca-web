@@ -218,22 +218,41 @@ export function RemoteProduct() {
   const handleBridgeChange = useCallback((bridge: WebBridge | null) => {
     setActiveBridge(bridge);
     if (bridge) {
+      // Capture the active connection ID for this bridge's callbacks.
+      // Safe because RemoteSession is keyed by activeEntry.id — so the
+      // bridge always corresponds to the connection that was active when
+      // this callback was created.
+      const connId = activeId;
+
+      /** Push workspace folders into both top-level state and the matching ConnectionEntry. */
+      const syncFolders = () => {
+        const folders = bridge.getWorkspaceFolders();
+        setWorkspaceFolders(folders);
+        if (connId && folders.length > 0) {
+          setEntries((prev) =>
+            prev.map((e) =>
+              e.id === connId ? { ...e, workspaceFolders: folders } : e,
+            ),
+          );
+        }
+      };
+
       bridge.onChatListChanged((entries, selected) => {
         setChatEntries(entries);
         setSelectedChatId(selected);
         // Workspace folders become available after session:connected,
         // which fires before chats are restored — so pick them up here.
-        setWorkspaceFolders(bridge.getWorkspaceFolders());
+        syncFolders();
       });
       setChatEntries(bridge.getChatEntries());
       setSelectedChatId(bridge.getSelectedChatId());
-      setWorkspaceFolders(bridge.getWorkspaceFolders());
+      syncFolders();
     } else {
       setChatEntries([]);
       setSelectedChatId(null);
       setWorkspaceFolders([]);
     }
-  }, []);
+  }, [activeId]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((prev) => !prev);

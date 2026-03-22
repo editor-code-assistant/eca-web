@@ -5,6 +5,7 @@
  * and close button. Includes an "add" button to open the connect form.
  */
 
+import type { WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
 import type { SessionStatus } from './RemoteSession';
 
@@ -19,6 +20,8 @@ export interface ConnectionEntry {
   protocol?: Protocol;
   status: SessionStatus | 'idle';
   error?: string;
+  /** Workspace folders reported by the server once the session is connected. */
+  workspaceFolders?: (WorkspaceFolder | string)[];
 }
 
 interface ConnectionBarProps {
@@ -49,15 +52,26 @@ export function ConnectionBar({
       <div className="conn-bar-tabs">
         {entries.map((entry) => {
           const isActive = entry.id === activeId;
+          const ws = getWorkspaceLabel(entry.workspaceFolders);
+          const tooltip = ws
+            ? `${ws.fullPath}\n${entry.host}`
+            : entry.host;
           return (
             <button
               key={entry.id}
               className={`conn-tab ${isActive ? 'active' : ''}`}
               onClick={() => onSwitch(entry.id)}
-              title={entry.host}
+              title={tooltip}
             >
               <span className={`conn-dot ${dotClass(isActive ? entry.status : 'idle')}`} />
-              <span className="conn-label">{formatHost(entry.host)}</span>
+              {ws ? (
+                <span className="conn-label conn-label-rich">
+                  <span className="conn-label-primary">{ws.name}</span>
+                  <span className="conn-label-secondary">{formatHost(entry.host)}</span>
+                </span>
+              ) : (
+                <span className="conn-label">{formatHost(entry.host)}</span>
+              )}
               <span
                 className="conn-close"
                 role="button"
@@ -85,6 +99,27 @@ export function ConnectionBar({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Extract a human-friendly workspace label from the first workspace folder.
+ * Returns `null` when no workspace data is available yet (e.g. still connecting).
+ */
+function getWorkspaceLabel(
+  folders?: (WorkspaceFolder | string)[],
+): { name: string; fullPath: string } | null {
+  if (!folders || folders.length === 0) return null;
+  const folder = folders[0];
+  const fullPath =
+    typeof folder === 'string'
+      ? folder
+      : folder.uri?.replace(/^file:\/\//, '') ?? folder.name ?? '';
+  if (!fullPath) return null;
+  const name =
+    (typeof folder === 'string' ? null : folder.name) ||
+    fullPath.split('/').filter(Boolean).pop() ||
+    fullPath;
+  return { name, fullPath };
+}
 
 /** Truncate a host string to fit in the tab bar. */
 function formatHost(host: string): string {

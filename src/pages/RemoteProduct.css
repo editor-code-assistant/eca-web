@@ -26,7 +26,7 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  height: 36px;
+  height: 40px;
   padding: 0 0.75rem;
   background: #14142a;
   border-bottom: 1px solid #2a2a3e;
@@ -113,11 +113,33 @@
   50% { opacity: 0.3; }
 }
 
-/* Label */
+/* Label — simple (host only, no workspace data yet) */
 .conn-label {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Label — rich (workspace name + host) */
+.conn-label-rich {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  gap: 0;
+  max-width: 180px;
+}
+
+.conn-label-primary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.conn-label-secondary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.62rem;
+  opacity: 0.5;
 }
 
 /* Close button */
