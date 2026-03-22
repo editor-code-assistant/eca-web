@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { probePort, testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
-import type { ChatEntry } from '../bridge/types';
+import type { ChatEntry, WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
 import { ChatSidebar, ChatSidebarToggle } from '../components/ChatSidebar';
 import {
@@ -44,6 +44,7 @@ export function RemoteProduct() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [workspaceFolders, setWorkspaceFolders] = useState<(WorkspaceFolder | string)[]>([]);
   const [discovery, setDiscovery] = useState<DiscoveryProgress | null>(null);
   const discoveryAbortRef = useRef<AbortController | null>(null);
 
@@ -220,12 +221,17 @@ export function RemoteProduct() {
       bridge.onChatListChanged((entries, selected) => {
         setChatEntries(entries);
         setSelectedChatId(selected);
+        // Workspace folders become available after session:connected,
+        // which fires before chats are restored — so pick them up here.
+        setWorkspaceFolders(bridge.getWorkspaceFolders());
       });
       setChatEntries(bridge.getChatEntries());
       setSelectedChatId(bridge.getSelectedChatId());
+      setWorkspaceFolders(bridge.getWorkspaceFolders());
     } else {
       setChatEntries([]);
       setSelectedChatId(null);
+      setWorkspaceFolders([]);
     }
   }, []);
 
@@ -258,6 +264,7 @@ export function RemoteProduct() {
             bridge={activeBridge}
             chats={chatEntries}
             selectedId={selectedChatId}
+            workspaceFolders={workspaceFolders}
             mobileOpen={sidebarOpen}
             onMobileClose={() => setSidebarOpen(false)}
           />

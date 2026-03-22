@@ -35,6 +35,7 @@ import type {
   SSESessionConnectedPayload,
   SSESessionMessagePayload,
   SSETrustUpdatedPayload,
+  WorkspaceFolder,
 } from './types';
 
 /** Timeout for the initial SSE handshake (session:connected). */
@@ -338,6 +339,11 @@ export class WebBridge {
   /** Get the currently selected chat ID. */
   getSelectedChatId(): string | null {
     return this.currentChatId;
+  }
+
+  /** Get the workspace folders from the current session (may be plain path strings). */
+  getWorkspaceFolders(): (WorkspaceFolder | string)[] {
+    return (this.sessionState?.workspaceFolders as (WorkspaceFolder | string)[] | undefined) ?? [];
   }
 
   /** Select a chat by ID — dispatches to the webview, loads messages if needed. */

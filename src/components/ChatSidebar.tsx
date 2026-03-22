@@ -11,7 +11,7 @@
 
 import { useCallback } from 'react';
 import type { WebBridge } from '../bridge/transport';
-import type { ChatEntry } from '../bridge/types';
+import type { ChatEntry, WorkspaceFolder } from '../bridge/types';
 import './ChatSidebar.css';
 
 // ---------------------------------------------------------------------------
@@ -22,6 +22,8 @@ interface ChatSidebarProps {
   bridge: WebBridge | null;
   chats: ChatEntry[];
   selectedId: string | null;
+  /** Workspace folders from the current server session (may be plain path strings). */
+  workspaceFolders?: (WorkspaceFolder | string)[];
   /** Whether the mobile drawer is open (controlled by parent). */
   mobileOpen: boolean;
   /** Called when the mobile drawer should close (backdrop tap, item select). */
@@ -49,7 +51,7 @@ export function ChatSidebarToggle({ onClick }: { onClick: () => void }) {
 // Main sidebar component
 // ---------------------------------------------------------------------------
 
-export function ChatSidebar({ bridge, chats = [], selectedId, mobileOpen, onMobileClose }: ChatSidebarProps) {
+export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders = [], mobileOpen, onMobileClose }: ChatSidebarProps) {
   const handleSelect = useCallback(
     (chatId: string) => {
       bridge?.selectChat(chatId);
@@ -81,6 +83,19 @@ export function ChatSidebar({ bridge, chats = [], selectedId, mobileOpen, onMobi
 
       {/* Sidebar panel */}
       <div className={`chat-sidebar ${mobileOpen ? 'open' : ''}`}>
+        {workspaceFolders.length > 0 && (() => {
+          const folder = workspaceFolders[0];
+          // Server sends workspace folders as plain path strings OR {name, uri} objects
+          const fullPath = typeof folder === 'string' ? folder : (folder.uri?.replace(/^file:\/\//, '') ?? folder.name ?? '');
+          const displayName = (typeof folder === 'string' ? null : folder.name) || fullPath.split('/').filter(Boolean).pop() || fullPath;
+          return (
+            <div className="chat-sidebar-workspace" title={fullPath}>
+              <i className="codicon codicon-folder" />
+              <span className="chat-sidebar-workspace-name">{displayName}</span>
+            </div>
+          );
+        })()}
+
         <div className="chat-sidebar-header">
           <span className="chat-sidebar-title">Chats</span>
           <button
