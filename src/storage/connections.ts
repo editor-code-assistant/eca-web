@@ -5,6 +5,7 @@
  * Includes one-time migration from the legacy single-connection format.
  */
 
+import type { WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
 
 // ---------------------------------------------------------------------------
@@ -16,6 +17,8 @@ export interface Connection {
   host: string;
   password: string;
   protocol?: Protocol;
+  /** Cached workspace folders from the last successful session. */
+  workspaceFolders?: (WorkspaceFolder | string)[];
 }
 
 // ---------------------------------------------------------------------------

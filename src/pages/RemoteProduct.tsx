@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { EcaRemoteApi } from '../bridge/api';
 import { probePort, testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry, WorkspaceFolder } from '../bridge/types';
@@ -51,12 +52,41 @@ export function RemoteProduct() {
   // --- Persistence ---
 
   useEffect(() => {
-    saveConnections(entries.map(({ id, host, password, protocol }) => ({ id, host, password, protocol })));
+    saveConnections(entries.map(({ id, host, password, protocol, workspaceFolders }) => ({ id, host, password, protocol, workspaceFolders })));
   }, [entries]);
 
   useEffect(() => {
     saveActiveId(activeId);
   }, [activeId]);
+
+  // --- Proactive workspace folder fetch ---
+  // For entries that don't have workspace folders yet (e.g. freshly added or
+  // loaded from storage before this feature existed), fire a lightweight
+  // session request to populate them. Uses a ref to avoid re-fetching.
+
+  const fetchedWorkspaceIdsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    for (const entry of entries) {
+      if (entry.workspaceFolders || fetchedWorkspaceIdsRef.current.has(entry.id)) continue;
+      fetchedWorkspaceIdsRef.current.add(entry.id);
+
+      const api = new EcaRemoteApi(entry.host, entry.password, entry.protocol);
+      api.session()
+        .then((session) => {
+          if (session.workspaceFolders?.length) {
+            setEntries((prev) =>
+              prev.map((e) =>
+                e.id === entry.id && !e.workspaceFolders
+                  ? { ...e, workspaceFolders: session.workspaceFolders }
+                  : e,
+              ),
+            );
+          }
+        })
+        .catch(() => { /* server not reachable yet — will populate when session connects */ });
+    }
+  }, [entries]);
 
   // --- Deep-link on mount ---
 
