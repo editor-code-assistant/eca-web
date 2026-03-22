@@ -73,8 +73,13 @@ export class WebBridge {
   private onChatListChange: ChatListChangeCallback | null = null;
 
   /**
-   * IDs of chats whose messages have already been fetched and dispatched.
-   * Used to avoid redundant loads when switching back to a previously viewed chat.
+   * IDs of chats whose full message history has been fetched from the REST API
+   * and dispatched to the webview. Used to avoid redundant loads when switching
+   * back to a previously viewed chat.
+   *
+   * Note: chats that only received live SSE events (e.g. a running chat that
+   * started streaming before the user opened it) are NOT in this set — they
+   * need a full REST fetch to load the earlier messages.
    */
   private loadedChatIds = new Set<string>();
 
@@ -477,8 +482,10 @@ export class WebBridge {
 
           // Track new chats and title updates for the sidebar.
           // Skip subagent chats — they render inside the parent chat's tool call.
+          // Note: we do NOT add to loadedChatIds here — live SSE events only
+          // carry new content, not the full history. A full REST fetch is needed
+          // when the user selects this chat to load earlier messages.
           if (data.chatId && !this.subagentChatIds.has(data.chatId)) {
-            this.loadedChatIds.add(data.chatId);
             this.upsertChatEntry(data.chatId, {});
             if (data.content?.type === 'metadata' && data.content?.title) {
               this.upsertChatEntry(data.chatId, { title: data.content.title });
@@ -691,6 +698,11 @@ export class WebBridge {
       console.log(`[Bridge] Loading messages for chat ${chatId}`);
       const chat = await this.api.getChat(chatId);
       this.loadedChatIds.add(chatId);
+
+      // Clear any partial content the webview may already have from live SSE
+      // events (e.g. a running chat that streamed new content before the user
+      // clicked on it). This prevents duplicates when we replay the full history.
+      this.dispatch('chat/cleared', { chatId, messages: true });
 
       const events = chatToRestoreEvents(chat);
 
