@@ -15,7 +15,7 @@ import type {
   SessionResponse,
 } from './types';
 import type { Protocol } from './utils';
-import { resolveBaseUrl } from './utils';
+import { localNetworkFetchOptions, resolveBaseUrl } from './utils';
 
 export class EcaRemoteApi {
   private baseUrl: string;
@@ -57,7 +57,9 @@ export class EcaRemoteApi {
     const { method = 'GET', body, auth = true, allowStatus = [] } = options;
     const hasBody = body !== undefined;
 
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const url = `${this.baseUrl}${path}`;
+    const res = await fetch(url, {
+      ...localNetworkFetchOptions(url),
       method,
       headers: auth ? this.headers(hasBody) : (hasBody ? { 'Content-Type': 'application/json' } : undefined),
       ...(hasBody ? { body: JSON.stringify(body) } : {}),

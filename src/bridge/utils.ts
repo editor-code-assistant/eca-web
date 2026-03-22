@@ -8,17 +8,26 @@
 
 export type Protocol = 'http' | 'https';
 
+/** RFC 1918 + loopback regex — matches private/local network hosts. */
+const LOCAL_NETWORK_RE =
+  /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|127\.|localhost)/i;
+
+/**
+ * Returns true when `host` targets a private/local network address.
+ * Used for protocol defaults and Chrome Local Network Access hints.
+ */
+export function isLocalNetworkHost(host: string): boolean {
+  return LOCAL_NETWORK_RE.test(host);
+}
+
 /**
  * Resolve the HTTP protocol for a given host string.
  * When an explicit protocol is provided it is used as-is;
- * otherwise localhost / 127.0.0.1 → http, everything else → https.
+ * otherwise private/loopback addresses → http, everything else → https.
  */
 export function resolveProtocol(host: string, protocol?: Protocol): Protocol {
   if (protocol) return protocol;
-  if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
-    return 'http';
-  }
-  return 'https';
+  return isLocalNetworkHost(host) ? 'http' : 'https';
 }
 
 /**
@@ -29,11 +38,35 @@ export function resolveBaseUrl(host: string, protocol?: Protocol): string {
 }
 
 /**
+ * Build extra fetch options for Chrome Local Network Access (LNA).
+ *
+ * When the target URL points to a private/local address, returns
+ * `{ targetAddressSpace: "local" }` so Chrome surfaces its LNA
+ * permission prompt instead of silently blocking the request.
+ *
+ * @see https://developer.chrome.com/blog/local-network-access
+ */
+export function localNetworkFetchOptions(url: string): RequestInit {
+  try {
+    const host = new URL(url).hostname;
+    if (isLocalNetworkHost(host)) {
+      return { targetAddressSpace: 'local' } as RequestInit;
+    }
+  } catch {
+    // invalid URL — ignore
+  }
+  return {};
+}
+
+/**
  * Fetch with an abort-based timeout.
  *
  * Wraps the standard `fetch` and aborts the request if it exceeds
  * `timeoutMs` milliseconds. The AbortError can be caught upstream
  * to show a user-friendly timeout message.
+ *
+ * Automatically adds `targetAddressSpace: "local"` for private-network
+ * URLs to cooperate with Chrome's Local Network Access restrictions.
  */
 export async function fetchWithTimeout(
   url: string,
@@ -43,7 +76,11 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await fetch(url, {
+      ...localNetworkFetchOptions(url),
+      ...init,
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timer);
   }

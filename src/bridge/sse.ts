@@ -9,6 +9,8 @@
  * the client assumes the connection is dead and triggers onDisconnect.
  */
 
+import { localNetworkFetchOptions } from './utils';
+
 export interface SSEEvent {
   event: string;
   data: string;
@@ -65,6 +67,7 @@ export class SSEClient {
     this.abortController = new AbortController();
 
     const response = await fetch(this.url, {
+      ...localNetworkFetchOptions(this.url),
       headers: { 'Authorization': `Bearer ${this.password}` },
       signal: this.abortController.signal,
     });
