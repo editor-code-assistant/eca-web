@@ -292,6 +292,22 @@ export interface ChatEntry {
 export type ChatListChangeCallback = (chats: ChatEntry[], selectedChatId: string | null) => void;
 
 // ---------------------------------------------------------------------------
+// Reconnection types
+// ---------------------------------------------------------------------------
+
+/** State emitted by the bridge during auto-reconnection attempts. */
+export interface ReconnectionState {
+  status: 'reconnecting' | 'reconnected' | 'failed';
+  /** Current attempt number (1-based). */
+  attempt: number;
+  /** Milliseconds until the next retry (only while status === 'reconnecting'). */
+  nextRetryMs?: number;
+}
+
+/** Callback signature for reconnection state changes. */
+export type ReconnectionCallback = (state: ReconnectionState) => void;
+
+// ---------------------------------------------------------------------------
 // Webview dispatch types (bridge → webview via postMessage)
 // ---------------------------------------------------------------------------
 

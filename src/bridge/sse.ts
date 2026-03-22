@@ -53,8 +53,14 @@ export class SSEClient {
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
   }
 
-  /** Open the SSE stream. Throws if the initial HTTP request fails. */
+  /**
+   * Open the SSE stream. Throws if the initial HTTP request fails.
+   * Safe to call again after a `disconnect()` — resets internal state first.
+   */
   async connect(): Promise<void> {
+    // Clean up any leftover state from a previous connection
+    this.cleanUp();
+
     this.running = true;
     this.abortController = new AbortController();
 
@@ -79,10 +85,16 @@ export class SSEClient {
   /** Cleanly close the SSE stream. Safe to call multiple times. */
   disconnect(): void {
     this.running = false;
+    this.cleanUp();
+  }
+
+  /** Release resources without changing the `running` flag. */
+  private cleanUp(): void {
     this.clearHeartbeatTimer();
     this.abortController?.abort();
     this.reader?.cancel().catch(() => {});
     this.reader = null;
+    this.abortController = null;
   }
 
   // ---------------------------------------------------------------------------

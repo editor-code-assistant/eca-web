@@ -95,9 +95,10 @@ function formatHost(host: string): string {
 /** Map connection status to a CSS dot class. */
 function dotClass(status: ConnectionEntry['status']): string {
   switch (status) {
-    case 'connected':  return 'dot-connected';
-    case 'connecting': return 'dot-connecting';
-    case 'error':      return 'dot-error';
-    default:           return 'dot-idle';
+    case 'connected':    return 'dot-connected';
+    case 'connecting':   return 'dot-connecting';
+    case 'reconnecting': return 'dot-reconnecting';
+    case 'error':        return 'dot-error';
+    default:             return 'dot-idle';
   }
 }

@@ -1,6 +1,7 @@
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { WebBridge } from '../bridge/transport';
+import type { ReconnectionState } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
 import WebviewApp from '@webview/App';
 import './RemoteSession.css';
@@ -48,7 +49,7 @@ class SessionErrorBoundary extends Component<
   }
 }
 
-export type SessionStatus = 'connecting' | 'connected' | 'error';
+export type SessionStatus = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 interface RemoteSessionProps {
   host: string;
@@ -66,6 +67,9 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
     | { status: 'error'; message: string }
   >({ status: 'connecting' });
 
+  /** Reconnection overlay state — shown on top of the mounted webview. */
+  const [reconnection, setReconnection] = useState<ReconnectionState | null>(null);
+
   const bridgeRef = useRef<WebBridge | null>(null);
   const mountedRef = useRef(true);
   const onStatusChangeRef = useRef(onStatusChange);
@@ -75,6 +79,7 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
 
   const connect = useCallback(async () => {
     setState({ status: 'connecting' });
+    setReconnection(null);
     onStatusChangeRef.current('connecting');
 
     // Disconnect any existing bridge
@@ -82,6 +87,22 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
 
     const bridge = new WebBridge(host, password, protocol);
     bridgeRef.current = bridge;
+
+    // Subscribe to reconnection events
+    bridge.onReconnection((rs) => {
+      if (!mountedRef.current) return;
+      if (rs.status === 'reconnecting') {
+        setReconnection(rs);
+        onStatusChangeRef.current('reconnecting');
+      } else if (rs.status === 'reconnected') {
+        // Keep the banner visible briefly so the user sees success
+        setReconnection({ ...rs, status: 'reconnected' });
+        onStatusChangeRef.current('connected');
+        setTimeout(() => {
+          if (mountedRef.current) setReconnection(null);
+        }, 1500);
+      }
+    });
 
     try {
       await bridge.connect();
@@ -115,28 +136,78 @@ export function RemoteSession({ host, password, protocol, onStatusChange, onBrid
     };
   }, [connect]);
 
-  const content = state.status === 'connected' ? (
-    <div className="remote-session">
-      <WebviewApp />
-    </div>
-  ) : state.status === 'error' ? (
-    <div className="remote-session-status">
-      <div className="remote-session-error">
-        <i className="codicon codicon-warning" />
-        <span>{state.message}</span>
+  // --- Connected state (with optional reconnecting overlay) ---
+  if (state.status === 'connected') {
+    return (
+      <SessionErrorBoundary>
+        <div className="remote-session">
+          <WebviewApp />
+          {reconnection && (
+            <ReconnectionOverlay state={reconnection} />
+          )}
+        </div>
+      </SessionErrorBoundary>
+    );
+  }
+
+  // --- Error state ---
+  if (state.status === 'error') {
+    return (
+      <SessionErrorBoundary>
+        <div className="remote-session-status">
+          <div className="remote-session-error">
+            <i className="codicon codicon-warning" />
+            <span>{state.message}</span>
+          </div>
+          <button className="remote-session-retry" onClick={connect}>
+            Retry
+          </button>
+        </div>
+      </SessionErrorBoundary>
+    );
+  }
+
+  // --- Connecting state ---
+  return (
+    <SessionErrorBoundary>
+      <div className="remote-session-status">
+        <div className="remote-session-connecting">
+          <div className="remote-session-spinner" />
+          <span>Connecting to {host}…</span>
+        </div>
       </div>
-      <button className="remote-session-retry" onClick={connect}>
-        Retry
-      </button>
-    </div>
-  ) : (
-    <div className="remote-session-status">
-      <div className="remote-session-connecting">
-        <div className="remote-session-spinner" />
-        <span>Connecting to {host}…</span>
+    </SessionErrorBoundary>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reconnection overlay (shown on top of the webview)
+// ---------------------------------------------------------------------------
+
+function ReconnectionOverlay({ state }: { state: ReconnectionState }) {
+  const isReconnected = state.status === 'reconnected';
+
+  return (
+    <div className={`reconnect-overlay ${isReconnected ? 'reconnect-overlay-success' : ''}`}>
+      <div className="reconnect-overlay-content">
+        {isReconnected ? (
+          <>
+            <i className="codicon codicon-check reconnect-icon-success" />
+            <span className="reconnect-text">Reconnected</span>
+          </>
+        ) : (
+          <>
+            <div className="reconnect-spinner" />
+            <div className="reconnect-info">
+              <span className="reconnect-text">Connection lost — reconnecting…</span>
+              <span className="reconnect-detail">
+                Attempt {state.attempt}
+                {state.nextRetryMs ? ` · retrying in ${Math.ceil(state.nextRetryMs / 1000)}s` : ''}
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
-
-  return <SessionErrorBoundary>{content}</SessionErrorBoundary>;
 }

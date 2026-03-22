@@ -95,6 +95,11 @@
   animation: dot-pulse 1s ease-in-out infinite;
 }
 
+.dot-reconnecting {
+  background: #ffaa32;
+  animation: dot-pulse 1s ease-in-out infinite;
+}
+
 .dot-error {
   background: #f14c4c;
 }

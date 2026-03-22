@@ -27,6 +27,8 @@ import type {
   ChatListChangeCallback,
   ChatSummary,
   MCPServerUpdatedParams,
+  ReconnectionCallback,
+  ReconnectionState,
   SessionConfig,
   SessionState,
   SSEChatStatusPayload,
@@ -38,6 +40,11 @@ import type {
 /** Timeout for the initial SSE handshake (session:connected). */
 const SSE_CONNECT_TIMEOUT_MS = 15_000;
 
+/** Base delay between reconnection attempts (exponential backoff). */
+const RECONNECT_BASE_DELAY_MS = 1_000;
+/** Maximum delay between reconnection attempts. */
+const RECONNECT_MAX_DELAY_MS = 15_000;
+
 export class WebBridge {
   private api: EcaRemoteApi;
   private sse: SSEClient | null = null;
@@ -46,6 +53,14 @@ export class WebBridge {
   private currentChatId: string | null = null;
   private outboundListener: ((e: Event) => void) | null = null;
   private mcpServers: MCPServerUpdatedParams[] = [];
+
+  // --- Reconnection state ---
+  private reconnecting = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private onReconnectionChange: ReconnectionCallback | null = null;
+  /** Set to true once the bridge has successfully connected at least once. */
+  private hasConnectedOnce = false;
 
   /**
    * Lightweight chat index exposed to the React shell for the sidebar.
@@ -106,6 +121,7 @@ export class WebBridge {
     await this.connectSSE();
     if (this.disposed) return;
 
+    this.hasConnectedOnce = true;
     this.registerOutboundHandler();
     this.registerTransport();
   }
@@ -113,6 +129,7 @@ export class WebBridge {
   disconnect(): void {
     this.disposed = true;
     this.connected = false;
+    this.cleanUpReconnect();
     this.sse?.disconnect();
     this.sse = null;
     window.__ecaWebTransport = undefined;
@@ -125,6 +142,181 @@ export class WebBridge {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /** Whether the bridge is currently attempting to reconnect. */
+  isReconnecting(): boolean {
+    return this.reconnecting;
+  }
+
+  /** Register a callback for reconnection state changes. */
+  onReconnection(cb: ReconnectionCallback): void {
+    this.onReconnectionChange = cb;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auto-reconnection
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Attempt to re-establish the SSE connection with exponential backoff.
+   *
+   * Called automatically when an established SSE connection drops
+   * (heartbeat timeout, stream end, network error). Does NOT fire for
+   * initial connection failures — those are surfaced to the caller of
+   * `connect()` directly.
+   *
+   * During reconnection the webview stays mounted with its full chat
+   * history; only the live SSE stream is re-opened.
+   */
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnecting) return;
+    this.reconnecting = true;
+    this.reconnectAttempt = 0;
+    this.attemptReconnect();
+  }
+
+  private attemptReconnect(): void {
+    if (this.disposed) {
+      this.cleanUpReconnect();
+      return;
+    }
+
+    this.reconnectAttempt++;
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY_MS * Math.pow(2, this.reconnectAttempt - 1),
+      RECONNECT_MAX_DELAY_MS,
+    );
+
+    console.log(
+      `[Bridge] Reconnect attempt #${this.reconnectAttempt} in ${delay}ms`,
+    );
+
+    this.notifyReconnection({
+      status: 'reconnecting',
+      attempt: this.reconnectAttempt,
+      nextRetryMs: delay,
+    });
+
+    this.reconnectTimer = setTimeout(async () => {
+      if (this.disposed) {
+        this.cleanUpReconnect();
+        return;
+      }
+
+      try {
+        // Quick health check first — fail fast if server is unreachable
+        await this.api.health();
+        if (this.disposed) return;
+
+        // Re-open SSE
+        await this.reconnectSSE();
+        if (this.disposed) return;
+
+        // Success!
+        console.log(`[Bridge] Reconnected after ${this.reconnectAttempt} attempt(s)`);
+        this.reconnecting = false;
+        this.reconnectAttempt = 0;
+
+        // Re-sync server state with the webview
+        await this.syncAfterReconnect();
+
+        this.notifyReconnection({
+          status: 'reconnected',
+          attempt: this.reconnectAttempt,
+        });
+      } catch (err) {
+        console.warn('[Bridge] Reconnect attempt failed:', err);
+        if (!this.disposed) {
+          this.attemptReconnect();
+        }
+      }
+    }, delay);
+  }
+
+  /**
+   * Re-open the SSE stream (without the full connect() ceremony).
+   * Rejects if the handshake times out or the connection fails.
+   */
+  private reconnectSSE(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('SSE reconnect timeout')),
+        SSE_CONNECT_TIMEOUT_MS,
+      );
+
+      // Disconnect old SSE if it still exists
+      this.sse?.disconnect();
+
+      this.sse = new SSEClient(
+        this.api.sseUrl(),
+        this.api.authPassword,
+        (event) => {
+          if (event.event === 'session:connected' && !this.connected) {
+            clearTimeout(timeout);
+            this.handleSessionConnected(event);
+            this.connected = true;
+            resolve();
+          } else {
+            this.handleSSEEvent(event);
+          }
+        },
+        (error) => {
+          if (!this.connected) {
+            clearTimeout(timeout);
+            reject(error);
+          } else {
+            console.error('[Bridge] SSE error:', error);
+          }
+        },
+        () => {
+          console.warn('[Bridge] SSE disconnected');
+          this.connected = false;
+          this.dispatch('server/statusChanged', 'Stopped');
+          this.scheduleReconnect();
+        },
+      );
+
+      this.sse.connect().catch((err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * After a successful reconnect, refresh session config and re-dispatch
+   * a "Running" status so the webview knows the server is back.
+   */
+  private async syncAfterReconnect(): Promise<void> {
+    if (!this.sessionState) return;
+
+    // Re-dispatch workspace and config in case the server restarted
+    if (this.sessionState.workspaceFolders) {
+      this.dispatch('server/setWorkspaceFolders', this.sessionState.workspaceFolders);
+    }
+    if (this.sessionState.config) {
+      this.dispatch('config/updated', this.sessionState.config);
+    }
+    if (this.sessionState.mcpServers) {
+      this.mcpServers = [...this.sessionState.mcpServers];
+      this.dispatch('tool/serversUpdated', this.mcpServers);
+    }
+    this.dispatch('server/setTrust', this.sessionState.trust ?? false);
+    this.dispatch('server/statusChanged', 'Running');
+  }
+
+  private notifyReconnection(state: ReconnectionState): void {
+    this.onReconnectionChange?.(state);
+  }
+
+  private cleanUpReconnect(): void {
+    this.reconnecting = false;
+    this.reconnectAttempt = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -220,6 +412,11 @@ export class WebBridge {
           console.warn('[Bridge] SSE disconnected');
           this.connected = false;
           this.dispatch('server/statusChanged', 'Stopped');
+
+          // Auto-reconnect if this was a previously-established connection
+          if (this.hasConnectedOnce && !this.disposed) {
+            this.scheduleReconnect();
+          }
         },
       );
 
