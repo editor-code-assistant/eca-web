@@ -184,20 +184,7 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
           {' '}<a href="https://eca.dev/config/remote" target="_blank" rel="noopener noreferrer">Learn more →</a>
         </p>
 
-        <div className="connect-features">
-          <div className="connect-feature">
-            <i className="codicon codicon-lock" />
-            <span>Encrypted</span>
-          </div>
-          <div className="connect-feature">
-            <i className="codicon codicon-sync" />
-            <span>Real-time</span>
-          </div>
-          <div className="connect-feature">
-            <i className="codicon codicon-layers" />
-            <span>Multi-session</span>
-          </div>
-        </div>
+
       </div>
     </div>
   );
