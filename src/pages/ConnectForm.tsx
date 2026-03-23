@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Protocol } from '../bridge/utils';
+import { CodeRain } from '../components/CodeRain';
 import './ConnectForm.css';
 
 /** Discovery progress reported by the parent during auto-scan. */
@@ -60,6 +61,7 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
 
   return (
     <div className="connect-page">
+      <CodeRain />
       <div className="connect-page-orb connect-page-orb--1" aria-hidden="true" />
       <div className="connect-page-orb connect-page-orb--2" aria-hidden="true" />
       <div className="connect-page-orb connect-page-orb--3" aria-hidden="true" />
