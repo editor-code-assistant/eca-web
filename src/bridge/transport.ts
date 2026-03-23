@@ -533,7 +533,6 @@ export class WebBridge {
         chats: data.chats,
         config: this.buildSessionConfig(data),
         trust: data.trust ?? false,
-        startedAt: data.startedAt,
       };
     } catch (err) {
       console.error('[Bridge] Failed to parse session:connected', err);
@@ -694,10 +693,8 @@ export class WebBridge {
    * fallback). Messages are NOT loaded here — they are fetched on demand when
    * the user selects a chat via `loadChatMessages()`.
    *
-   * When the server provides a `startedAt` timestamp, only chats that were
-   * created or updated since the server started are shown. This prevents the
-   * sidebar from filling up with stale chats from previous server sessions.
-   * Chats that a user resumed (updated) after the server started are included.
+   * All chats returned by the server are shown in the sidebar — the server
+   * is the authority on which chats are valid.
    */
   private async restoreChats(): Promise<void> {
     let summaries: ChatSummary[] | undefined = this.sessionState?.chats;
@@ -725,30 +722,6 @@ export class WebBridge {
     });
 
     if (!summaries?.length) return;
-
-    // Filter to only show chats from the current server session.
-    // A chat qualifies if it was created or updated after the server started,
-    // or if it is currently running (active right now).
-    const serverStartedAt = this.sessionState?.startedAt;
-    if (serverStartedAt) {
-      const startTime = new Date(serverStartedAt).getTime();
-      const before = summaries.length;
-      summaries = summaries.filter((s) => {
-        // Always show currently running chats
-        if (s.status === 'running') return true;
-        // Show if updated (resumed) since server started.
-        // Timestamps may be epoch millis (number) or ISO strings.
-        const updated = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
-        if (updated >= startTime) return true;
-        // Show if created since server started (and never updated)
-        if (!s.updatedAt) {
-          const created = s.createdAt ? new Date(s.createdAt).getTime() : 0;
-          if (created >= startTime) return true;
-        }
-        return false;
-      });
-      console.log(`[Bridge] Filtered chats: ${before} total → ${summaries.length} from current session`);
-    }
 
     if (!summaries?.length) return;
 

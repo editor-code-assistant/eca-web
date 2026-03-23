@@ -182,8 +182,6 @@ export interface SSESessionConnectedPayload {
   variants?: string[];
   selectedVariant?: string | null;
   trust?: boolean;
-  /** ISO timestamp of when the server process started. Used to filter stale chats. */
-  startedAt?: string;
 }
 
 export interface SSETrustUpdatedPayload {
@@ -213,8 +211,6 @@ export interface SessionState {
   chats?: ChatSummary[];
   config?: SessionConfig;
   trust?: boolean;
-  /** ISO timestamp of when the server process started. Used to filter stale chats. */
-  startedAt?: string;
 }
 
 export interface SessionConfig {
