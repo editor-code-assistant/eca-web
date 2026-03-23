@@ -15,7 +15,7 @@ import type {
   SessionResponse,
 } from './types';
 import type { Protocol } from './utils';
-import { localNetworkFetchOptions, resolveBaseUrl } from './utils';
+import { fetchWithTimeout, resolveBaseUrl } from './utils';
 
 export class EcaRemoteApi {
   private baseUrl: string;
@@ -37,12 +37,17 @@ export class EcaRemoteApi {
     return h;
   }
 
+  /** Default timeout for REST requests (ms). */
+  private static readonly REQUEST_TIMEOUT_MS = 15_000;
+
   /**
    * Generic fetch-check-parse helper.
    * - Adds auth headers automatically.
    * - Throws an `Error` when the response status is not OK,
    *   unless `allowStatus` includes that specific code.
    * - Returns `undefined` for 204 No Content or void endpoints.
+   * - Enforces a per-request timeout via AbortController to prevent
+   *   hung connections during page refresh or network instability.
    */
   private async request<T = void>(
     path: string,
@@ -52,24 +57,33 @@ export class EcaRemoteApi {
       auth?: boolean;
       /** HTTP status codes that should NOT throw (e.g. 409 for idempotent ops). */
       allowStatus?: number[];
+      /** Override the default request timeout (ms). */
+      timeoutMs?: number;
     } = {},
   ): Promise<T> {
-    const { method = 'GET', body, auth = true, allowStatus = [] } = options;
+    const { method = 'GET', body, auth = true, allowStatus = [], timeoutMs } = options;
     const hasBody = body !== undefined;
 
     const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url, {
-      ...localNetworkFetchOptions(url),
-      method,
-      headers: auth ? this.headers(hasBody) : (hasBody ? { 'Content-Type': 'application/json' } : undefined),
-      ...(hasBody ? { body: JSON.stringify(body) } : {}),
-    });
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method,
+        headers: auth ? this.headers(hasBody) : (hasBody ? { 'Content-Type': 'application/json' } : undefined),
+        ...(hasBody ? { body: JSON.stringify(body) } : {}),
+      },
+      timeoutMs ?? EcaRemoteApi.REQUEST_TIMEOUT_MS,
+    );
 
     if (!res.ok && !allowStatus.includes(res.status)) {
       // Try to extract a structured error message from the body
       const errBody = await res.json().catch(() => null);
       const message = errBody?.error?.message || `${method} ${path} failed: ${res.status}`;
-      throw new Error(message);
+      const error = new Error(message);
+      // Attach the HTTP status code so callers can distinguish 404 from
+      // transient errors (500, timeout) without fragile string matching.
+      (error as any).status = res.status;
+      throw error;
     }
 
     // Return parsed JSON for responses that have a body

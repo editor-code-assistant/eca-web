@@ -101,10 +101,26 @@ export class WebBridge {
 
   /**
    * True while the bridge is restoring chat state from the server.
-   * During this window, live `chat:content-received` SSE events are
-   * skipped to prevent duplicate messages in the webview.
+   * During this window, all chat-mutating SSE events are queued and
+   * replayed after restoration completes to prevent duplicates and
+   * state corruption (e.g. a `chat:deleted` arriving mid-restore
+   * could remove a chat being actively restored).
    */
   private restoring = false;
+
+  /**
+   * SSE events queued while `restoring` is true. These are replayed
+   * in order after restore completes via `flushRestoreQueue()`.
+   */
+  private restoreQueue: SSEEvent[] = [];
+
+  /**
+   * Counter for automatic restore retries (on transient failures).
+   * Prevents unbounded retry loops when the server is persistently
+   * unreachable. Reset to 0 on successful chat load.
+   */
+  private restoreRetryCount = 0;
+  private static readonly MAX_RESTORE_RETRIES = 3;
 
   /**
    * True after `dispatchInitialState()` has executed once.  Prevents
@@ -144,7 +160,9 @@ export class WebBridge {
     await this.connectSSE();
     if (this.disposed) return;
 
-    this.hasConnectedOnce = true;
+    // Note: hasConnectedOnce is set inside the SSE session:connected callback
+    // (before this promise resolves) to prevent a race where an immediate SSE
+    // disconnect between resolve() and here would dispatch 'Stopped'.
     this.registerOutboundHandler();
     this.registerTransport();
   }
@@ -153,6 +171,7 @@ export class WebBridge {
     this.disposed = true;
     this.connected = false;
     this.cleanUpReconnect();
+    this.restoreQueue = [];
     this.sse?.disconnect();
     this.sse = null;
     window.__ecaWebTransport = undefined;
@@ -381,6 +400,7 @@ export class WebBridge {
       console.error('[Bridge] Failed to re-sync chats after reconnect:', err);
     } finally {
       this.restoring = false;
+      this.flushRestoreQueue();
     }
   }
 
@@ -435,12 +455,16 @@ export class WebBridge {
       // Fetch and dispatch content events. The first contentReceived event
       // auto-creates the chat in Redux and sets it as selectedChat, so we
       // don't need a separate selectChat dispatch (which would race).
-      await this.loadChatMessages(chatId);
+      const result = await this.loadChatMessages(chatId);
 
-      // If loading failed (server error, network issue), still switch to the
-      // chat so the sidebar selection stays consistent. The webview will show
-      // the chat even if empty, and a future retry can populate it.
-      if (!this.loadedChatIds.has(chatId)) {
+      if (result === 'not_found') {
+        // Chat was deleted on the server — remove stale sidebar entry.
+        this.removeChatEntry(chatId);
+        this.currentChatId = null;
+      } else if (!this.loadedChatIds.has(chatId)) {
+        // Transient failure — still switch to the chat so the sidebar
+        // selection stays consistent. The webview will show the chat
+        // even if empty, and a future retry can populate it.
         this.dispatch('chat/selectChat', chatId);
       }
     }
@@ -503,6 +527,11 @@ export class WebBridge {
           if (event.event === 'session:connected' && !this.connected) {
             clearTimeout(timeout);
             this.handleSessionConnected(event);
+            // Mark as connected-once BEFORE resolving so the disconnect
+            // handler (which can fire at any time) never sees a half-state
+            // where connected=true but hasConnectedOnce=false — that gap
+            // would cause a spurious 'Stopped' dispatch that clears chats.
+            this.hasConnectedOnce = true;
             this.connected = true;
             resolve();
           } else {
@@ -559,14 +588,34 @@ export class WebBridge {
       };
     } catch (err) {
       console.error('[Bridge] Failed to parse session:connected', err);
+      // Build a minimal sessionState so dispatchInitialState() doesn't
+      // bail out entirely. Without this, a parse failure leaves the webview
+      // stuck on "Waiting for server to start" with no indication of error.
+      this.sessionState = {
+        chats: [],
+        config: { chat: { models: [], agents: [], welcomeMessage: 'Welcome to ECA Web', variants: [], selectedVariant: null } },
+        trust: false,
+      };
     }
   }
+
+  /** SSE event types that mutate chat state and must be queued during restore. */
+  private static readonly RESTORE_QUEUED_EVENTS = new Set([
+    'chat:content-received',
+    'chat:status-changed',
+    'chat:cleared',
+    'chat:deleted',
+  ]);
 
   private handleSSEEvent(event: SSEEvent): void {
     if (this.disposed) return;
 
-    // Skip chat content during restore to prevent duplicates
-    if (this.restoring && event.event === 'chat:content-received') {
+    // Queue all chat-mutating events while restoring to prevent duplicates,
+    // ghost chats from `chat:status-changed`, and state corruption from
+    // `chat:cleared`/`chat:deleted` arriving mid-restore. Queued events
+    // are replayed in order after restoration completes.
+    if (this.restoring && WebBridge.RESTORE_QUEUED_EVENTS.has(event.event)) {
+      this.restoreQueue.push(event);
       return;
     }
 
@@ -678,7 +727,11 @@ export class WebBridge {
   // ---------------------------------------------------------------------------
 
   private async dispatchInitialState(): Promise<void> {
-    if (this.initialStateDispatched || !this.sessionState) return;
+    if (this.initialStateDispatched) return;
+    if (!this.sessionState) {
+      console.error('[Bridge] Cannot dispatch initial state — session:connected was not received or failed to parse');
+      return;
+    }
     this.initialStateDispatched = true;
 
     this.restoring = true;
@@ -708,6 +761,7 @@ export class WebBridge {
       await this.restoreChats();
     } finally {
       this.restoring = false;
+      this.flushRestoreQueue();
     }
   }
 
@@ -726,13 +780,22 @@ export class WebBridge {
   private async restoreChats(): Promise<void> {
     let summaries: ChatSummary[] | undefined = this.sessionState?.chats;
 
-    // Fallback: fetch summaries from REST if session:connected had none
+    // Fallback: fetch summaries from REST if session:connected had none.
+    // Retries once after a short delay to handle post-refresh network churn.
     if (!summaries?.length) {
-      try {
-        summaries = await this.api.chats();
-      } catch (err) {
-        console.error('[Bridge] Failed to fetch chat list:', err);
-        return;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          summaries = await this.api.chats();
+          break;
+        } catch (err) {
+          if (attempt < 2) {
+            console.warn('[Bridge] Failed to fetch chat list, retrying in 500ms...', err);
+            await new Promise((r) => setTimeout(r, 500));
+          } else {
+            console.error('[Bridge] Failed to fetch chat list after retries:', err);
+            return;
+          }
+        }
       }
     }
 
@@ -747,8 +810,6 @@ export class WebBridge {
       }
       return true;
     });
-
-    if (!summaries?.length) return;
 
     if (!summaries?.length) return;
 
@@ -779,21 +840,31 @@ export class WebBridge {
 
     // Try each candidate until one loads successfully.
     let loaded = false;
+    let hadTransientFailures = false;
     for (const candidate of candidates) {
       if (!candidate?.id) continue;
       this.currentChatId = candidate.id;
-      if (await this.loadChatMessages(candidate.id)) {
+      const result = await this.loadChatMessages(candidate.id);
+      if (result === true) {
         // Clear stale preferred if we had to fall back to a different chat.
         if (preferred && candidate.id !== preferred.id) {
           console.log(`[Bridge] Preferred chat ${this.preferredChatId} no longer exists, fell back to ${candidate.id}`);
           this.preferredChatId = null;
         }
         loaded = true;
+        this.restoreRetryCount = 0; // Reset retry counter on success
         break;
       }
-      // Chat doesn't exist on the server — remove its stale sidebar entry.
-      console.warn(`[Bridge] Chat ${candidate.id} failed to load, removing from sidebar`);
-      this.removeChatEntry(candidate.id);
+      if (result === 'not_found') {
+        // Chat is confirmed deleted on the server — remove stale sidebar entry.
+        console.warn(`[Bridge] Chat ${candidate.id} no longer exists, removing from sidebar`);
+        this.removeChatEntry(candidate.id);
+      } else {
+        // Transient error (timeout, network, 500) — keep the sidebar entry
+        // so the user can retry later. Don't remove valid chats on flaky networks.
+        console.warn(`[Bridge] Chat ${candidate.id} failed to load (transient error), keeping sidebar entry`);
+        hadTransientFailures = true;
+      }
     }
 
     // If nothing loaded, clear stale preferred and reset current chat so
@@ -801,6 +872,21 @@ export class WebBridge {
     if (!loaded) {
       this.currentChatId = null;
       this.preferredChatId = null;
+
+      // If we had transient failures (not 404s), schedule a retry — the
+      // server is likely temporarily unreachable after a page refresh.
+      if (hadTransientFailures && this.restoreRetryCount < WebBridge.MAX_RESTORE_RETRIES) {
+        this.restoreRetryCount++;
+        const delay = 2_000 * this.restoreRetryCount; // Increasing delay: 2s, 4s, 6s
+        console.log(`[Bridge] Scheduling automatic chat restore retry ${this.restoreRetryCount}/${WebBridge.MAX_RESTORE_RETRIES} in ${delay}ms...`);
+        setTimeout(() => {
+          if (!this.disposed && !this.loadedChatIds.size) {
+            this.retryRestoreChats();
+          }
+        }, delay);
+      } else if (hadTransientFailures) {
+        console.error(`[Bridge] Giving up after ${this.restoreRetryCount} restore retries. Chats may be available — try refreshing the page.`);
+      }
     }
 
     this.notifyChatListChange();
@@ -818,9 +904,10 @@ export class WebBridge {
    * and on demand when the user switches chats.
    *
    * @returns `true` if the chat was successfully loaded (or was already loaded),
-   *          `false` if loading failed (e.g. chat deleted, server error).
+   *          `'not_found'` if the chat is confirmed deleted on the server (404),
+   *          `'error'` if loading failed due to a transient issue (timeout, network, 500).
    */
-  async loadChatMessages(chatId: string): Promise<boolean> {
+  async loadChatMessages(chatId: string): Promise<boolean | 'not_found' | 'error'> {
     if (this.loadedChatIds.has(chatId)) return true;
 
     try {
@@ -833,9 +920,11 @@ export class WebBridge {
       if (chat) {
         console.log(`[Bridge] Cache hit for chat ${chatId} (${chat.messages?.length ?? 0} msgs)`);
       } else {
-        // Cache miss — fetch from server with one retry on failure
-        chat = await this.fetchChatWithRetry(chatId);
-        if (!chat) return false; // Both attempts failed
+        // Cache miss — fetch from server with retries
+        const result = await this.fetchChatWithRetry(chatId);
+        if (result === WebBridge.CHAT_NOT_FOUND) return 'not_found';
+        if (result === WebBridge.CHAT_FETCH_ERROR) return 'error';
+        chat = result;
 
         // Populate cache for future use
         messageCache.set(this.host, chatId, chat);
@@ -873,31 +962,87 @@ export class WebBridge {
       return true;
     } catch (err) {
       console.error(`[Bridge] Failed to load messages for chat ${chatId}:`, err);
-      return false;
+      return 'error';
+    }
+  }
+
+  /** Result of fetchChatWithRetry — discriminates 404 from transient errors. */
+  private static readonly CHAT_NOT_FOUND = 'not_found' as const;
+  private static readonly CHAT_FETCH_ERROR = 'fetch_error' as const;
+
+  /**
+   * Fetch a chat from the REST API with retries and exponential backoff.
+   * Does NOT retry on "does not exist" errors (404) — the chat is gone.
+   *
+   * Returns the chat on success, or a discriminated string indicating
+   * whether the failure was a confirmed 404 ('not_found') or a transient
+   * error ('fetch_error'). This lets the caller decide whether to remove
+   * the sidebar entry (404) or keep it (transient).
+   */
+  private async fetchChatWithRetry(
+    chatId: string,
+  ): Promise<import('./types').RemoteChat | 'not_found' | 'fetch_error'> {
+    const MAX_ATTEMPTS = 3;
+    const RETRY_DELAY_MS = 500;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.api.getChat(chatId);
+      } catch (err: any) {
+        // Don't retry on 404 — the chat is definitively gone.
+        // Check both the HTTP status code (attached by api.request()) and
+        // the error message for robustness.
+        if (err?.status === 404 || err?.message?.includes('does not exist')) {
+          console.warn(`[Bridge] Chat ${chatId} does not exist on the server`);
+          return WebBridge.CHAT_NOT_FOUND;
+        }
+
+        if (attempt < MAX_ATTEMPTS) {
+          console.warn(`[Bridge] Fetch attempt ${attempt}/${MAX_ATTEMPTS} failed for chat ${chatId}, retrying in ${RETRY_DELAY_MS}ms...`, err);
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        } else {
+          console.error(`[Bridge] All ${MAX_ATTEMPTS} fetch attempts failed for chat ${chatId}:`, err);
+        }
+      }
+    }
+    return WebBridge.CHAT_FETCH_ERROR;
+  }
+
+  /**
+   * Replay SSE events that were queued while `restoring` was true.
+   * Called in the `finally` block of `dispatchInitialState()` and
+   * `syncAfterReconnect()` after `restoring` is set back to false.
+   */
+  private flushRestoreQueue(): void {
+    if (this.restoreQueue.length === 0) return;
+
+    const queued = this.restoreQueue;
+    this.restoreQueue = [];
+    console.log(`[Bridge] Replaying ${queued.length} queued SSE event(s) from restore window`);
+
+    for (const event of queued) {
+      this.handleSSEEvent(event);
     }
   }
 
   /**
-   * Fetch a chat from the REST API with a single retry on transient failures.
-   * Does NOT retry on "does not exist" errors (404) — the chat is gone.
-   * Returns null if the fetch ultimately fails.
+   * Retry chat restoration after a transient failure.
+   * Resets the dispatch guard and loaded state, then re-runs `restoreChats()`.
+   * Safe to call multiple times — protected by the `restoring` flag.
    */
-  private async fetchChatWithRetry(chatId: string): Promise<import('./types').RemoteChat | null> {
+  private async retryRestoreChats(): Promise<void> {
+    if (this.restoring || this.disposed) return;
+
+    console.log('[Bridge] Retrying chat restore...');
+    this.restoring = true;
     try {
-      return await this.api.getChat(chatId);
-    } catch (err: any) {
-      // Don't retry on 404 — the chat is definitively gone
-      if (err?.message?.includes('does not exist')) {
-        console.warn(`[Bridge] Chat ${chatId} does not exist on the server`);
-        return null;
-      }
-      console.warn(`[Bridge] First fetch failed for chat ${chatId}, retrying...`, err);
-      try {
-        return await this.api.getChat(chatId);
-      } catch (retryErr) {
-        console.error(`[Bridge] Retry also failed for chat ${chatId}:`, retryErr);
-        return null;
-      }
+      this.loadedChatIds.clear();
+      await this.restoreChats();
+    } catch (err) {
+      console.error('[Bridge] Retry of chat restore failed:', err);
+    } finally {
+      this.restoring = false;
+      this.flushRestoreQueue();
     }
   }
 
