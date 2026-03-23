@@ -68,7 +68,8 @@ export async function handleOutbound(
         break;
 
       case 'chat/delete':
-        await api.deleteChat(data.chatId);
+        // No-op in web: closing a tab should not delete the chat from the
+        // server cache.  The webview already removes it locally via resetChat.
         break;
 
       case 'chat/rollback':

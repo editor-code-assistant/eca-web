@@ -453,14 +453,7 @@ export class WebBridge {
     this.dispatch('chat/createNewChat', undefined);
   }
 
-  /** Delete a chat by ID — calls the REST API. */
-  async deleteChatFromSidebar(chatId: string): Promise<void> {
-    try {
-      await this.api.deleteChat(chatId);
-    } catch (err) {
-      console.error('[Bridge] Failed to delete chat:', err);
-    }
-  }
+
 
   // ---------------------------------------------------------------------------
   // Trust API (for the shell layer)

@@ -31,7 +31,7 @@ import './RemoteProduct.css';
 
 /** Port range for auto-discovery */
 const DISCOVERY_PORT_START = 7777;
-const DISCOVERY_PORT_END = 7787;
+const DISCOVERY_PORT_END = 7796;
 
 export function RemoteProduct() {
   const [entries, setEntries] = useState<ConnectionEntry[]>(() =>
@@ -155,7 +155,7 @@ export function RemoteProduct() {
     }
   }, [entries]);
 
-  /** Auto-discover ECA servers on ports 7777–7787 in parallel. */
+  /** Auto-discover ECA servers on ports 7777–7796 in parallel. */
   const discoverConnections = useCallback(async (host: string, password: string, protocol?: Protocol) => {
     // Abort any previous discovery
     discoveryAbortRef.current?.abort();
@@ -187,7 +187,7 @@ export function RemoteProduct() {
 
     // Only error when zero servers were discovered
     if (progress.found.length === 0) {
-      setFormError('No ECA servers found on ports 7777–7787. Check the host and password.');
+      setFormError('No ECA servers found on ports 7777–7796. Check the host and password.');
       setFormConnecting(false);
       return;
     }

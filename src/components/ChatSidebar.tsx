@@ -69,13 +69,7 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
     onMobileClose();
   }, [bridge, onMobileClose]);
 
-  const handleDelete = useCallback(
-    (e: React.MouseEvent, chatId: string) => {
-      e.stopPropagation();
-      bridge?.deleteChatFromSidebar(chatId);
-    },
-    [bridge],
-  );
+
 
   return (
     <>
@@ -130,21 +124,6 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
                 {chat.status === 'running' && (
                   <span className="chat-sidebar-status running" />
                 )}
-                <span
-                  className="chat-sidebar-delete"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => handleDelete(e as unknown as React.MouseEvent, chat.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.stopPropagation();
-                      bridge?.deleteChatFromSidebar(chat.id);
-                    }
-                  }}
-                  title="Delete chat"
-                >
-                  <i className="codicon codicon-close" />
-                </span>
               </button>
             ))
           )}

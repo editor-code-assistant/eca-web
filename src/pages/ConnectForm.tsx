@@ -124,7 +124,7 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
               <span className="connect-toggle-label">Auto-discover sessions</span>
             </label>
             <span className="connect-discovery-hint">
-              {autoDiscover ? 'Scan ports 7777–7787' : `Port ${port || '7777'}`}
+              {autoDiscover ? 'Scan ports 7777–7796' : `Port ${port || '7777'}`}
             </span>
           </div>
 
