@@ -21,6 +21,7 @@ html[data-editor="web"] {
 
   --eca-success-fg: #73c991;
   --eca-warning-fg: #cca700;
+  --eca-approval-fg: #e8850c;
   --eca-error-fg: #f14c4c;
 
   --eca-warning-message-fg: #cca700;

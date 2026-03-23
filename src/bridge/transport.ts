@@ -36,6 +36,7 @@ import type {
   SSESessionConnectedPayload,
   SSESessionMessagePayload,
   SSETrustUpdatedPayload,
+  TrustChangeCallback,
   WorkspaceFolder,
 } from './types';
 
@@ -75,6 +76,9 @@ export class WebBridge {
 
   /** Callback invoked whenever the chat list or selection changes. */
   private onChatListChange: ChatListChangeCallback | null = null;
+
+  /** Callback invoked whenever trust mode changes. */
+  private onTrustChange: TrustChangeCallback | null = null;
 
   /**
    * IDs of chats whose full message history has been fetched from the REST API
@@ -459,6 +463,32 @@ export class WebBridge {
   }
 
   // ---------------------------------------------------------------------------
+  // Trust API (for the shell layer)
+  // ---------------------------------------------------------------------------
+
+  /** Register a listener for trust state changes. */
+  onTrustChanged(cb: TrustChangeCallback): void {
+    this.onTrustChange = cb;
+    // Immediately fire with current state
+    cb(this.sessionState?.trust ?? false);
+  }
+
+  /** Get the current trust mode. */
+  getTrust(): boolean {
+    return this.sessionState?.trust ?? false;
+  }
+
+  /** Toggle trust mode — calls the REST API and lets the SSE event confirm the change. */
+  async toggleTrust(): Promise<void> {
+    const newTrust = !(this.sessionState?.trust ?? false);
+    try {
+      await this.api.setTrust(newTrust);
+    } catch (err) {
+      console.error('[Bridge] Failed to toggle trust:', err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // SSE connection
   // ---------------------------------------------------------------------------
 
@@ -632,7 +662,11 @@ export class WebBridge {
 
         case 'trust:updated': {
           const trustData = data as SSETrustUpdatedPayload;
+          if (this.sessionState) {
+            this.sessionState.trust = trustData.trust;
+          }
           this.dispatch('server/setTrust', trustData.trust);
+          this.onTrustChange?.(trustData.trust);
           break;
         }
 

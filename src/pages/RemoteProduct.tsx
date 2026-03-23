@@ -46,6 +46,7 @@ export function RemoteProduct() {
   const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [workspaceFolders, setWorkspaceFolders] = useState<(WorkspaceFolder | string)[]>([]);
+  const [trust, setTrust] = useState(false);
   const [discovery, setDiscovery] = useState<DiscoveryProgress | null>(null);
   const discoveryAbortRef = useRef<AbortController | null>(null);
 
@@ -267,6 +268,8 @@ export function RemoteProduct() {
         }
       };
 
+      bridge.onTrustChanged((t) => setTrust(t));
+
       bridge.onChatListChanged((entries, selected) => {
         setChatEntries(entries);
         setSelectedChatId(selected);
@@ -293,12 +296,17 @@ export function RemoteProduct() {
       setChatEntries([]);
       setSelectedChatId(null);
       setWorkspaceFolders([]);
+      setTrust(false);
     }
   }, [activeId]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((prev) => !prev);
   }, []);
+
+  const handleToggleTrust = useCallback(() => {
+    activeBridge?.toggleTrust();
+  }, [activeBridge]);
 
   // --- Render ---
 
@@ -328,6 +336,8 @@ export function RemoteProduct() {
             workspaceFolders={workspaceFolders}
             mobileOpen={sidebarOpen}
             onMobileClose={() => setSidebarOpen(false)}
+            trust={trust}
+            onToggleTrust={handleToggleTrust}
           />
         )}
 

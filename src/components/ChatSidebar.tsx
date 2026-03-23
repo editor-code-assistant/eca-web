@@ -28,6 +28,10 @@ interface ChatSidebarProps {
   mobileOpen: boolean;
   /** Called when the mobile drawer should close (backdrop tap, item select). */
   onMobileClose: () => void;
+  /** Current trust mode state. */
+  trust?: boolean;
+  /** Called when the user toggles trust mode. */
+  onToggleTrust?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +55,7 @@ export function ChatSidebarToggle({ onClick }: { onClick: () => void }) {
 // Main sidebar component
 // ---------------------------------------------------------------------------
 
-export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders = [], mobileOpen, onMobileClose }: ChatSidebarProps) {
+export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders = [], mobileOpen, onMobileClose, trust = false, onToggleTrust }: ChatSidebarProps) {
   const handleSelect = useCallback(
     (chatId: string) => {
       bridge?.selectChat(chatId);
@@ -145,6 +149,22 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
             ))
           )}
         </div>
+
+        {onToggleTrust && (
+          <button
+            className={`chat-sidebar-trust ${trust ? 'trust-on' : 'trust-off'}`}
+            onClick={onToggleTrust}
+            title={trust
+              ? 'Trust ON — tool calls are auto-accepted'
+              : 'Trust OFF — tool calls require approval'}
+          >
+            <i className={`codicon ${trust ? 'codicon-unlock' : 'codicon-lock'}`} />
+            <span className="chat-sidebar-trust-label">
+              Trust {trust ? 'ON' : 'OFF'}
+            </span>
+            <span className={`chat-sidebar-trust-dot ${trust ? 'on' : 'off'}`} />
+          </button>
+        )}
       </div>
     </>
   );

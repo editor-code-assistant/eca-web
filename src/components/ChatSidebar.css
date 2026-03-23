@@ -227,6 +227,64 @@
   color: #f14c4c;
 }
 
+/* ---- Trust toggle ---- */
+.chat-sidebar-trust {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  border-top: 1px solid #2a2a3e;
+  background: transparent;
+  color: #5a6a7a;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.chat-sidebar-trust:hover {
+  background: #1a1a2e;
+  color: #8a9ab0;
+}
+
+.chat-sidebar-trust .codicon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.chat-sidebar-trust-label {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+}
+
+.chat-sidebar-trust-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.chat-sidebar-trust-dot.off {
+  background: #5a6a7a;
+}
+
+.chat-sidebar-trust-dot.on {
+  background: #f44747;
+}
+
+.chat-sidebar-trust.trust-on {
+  color: #f44747;
+}
+
+.chat-sidebar-trust.trust-on:hover {
+  color: #f77;
+}
+
 /* ---- Mobile hamburger button ---- */
 .chat-sidebar-toggle {
   display: none;

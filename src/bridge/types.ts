@@ -287,6 +287,9 @@ export interface ChatEntry {
 /** Callback signature for chat list change notifications. */
 export type ChatListChangeCallback = (chats: ChatEntry[], selectedChatId: string | null) => void;
 
+/** Callback signature for trust state change notifications. */
+export type TrustChangeCallback = (trust: boolean) => void;
+
 // ---------------------------------------------------------------------------
 // Reconnection types
 // ---------------------------------------------------------------------------
