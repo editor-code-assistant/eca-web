@@ -60,6 +60,9 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
 
   return (
     <div className="connect-page">
+      <div className="connect-page-orb connect-page-orb--1" aria-hidden="true" />
+      <div className="connect-page-orb connect-page-orb--2" aria-hidden="true" />
+      <div className="connect-page-orb connect-page-orb--3" aria-hidden="true" />
       <div className="connect-card">
         <div className="connect-logo">
           <img src="/logo.svg" alt="ECA" />
