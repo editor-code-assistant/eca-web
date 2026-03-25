@@ -7,8 +7,8 @@
  * SSE connection.
  */
 
-import type { Protocol } from './utils';
-import { fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl, resolveProtocol } from './utils';
+import type { BrowserKind, Protocol } from './utils';
+import { detectBrowser, fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl, resolveProtocol } from './utils';
 
 /**
  * Lightweight probe to check if an ECA server is listening on a given port.
@@ -38,15 +38,63 @@ export async function probePort(
 }
 
 /** True when the page is served over HTTPS and the target is plain HTTP on a private IP. */
-function isMixedContentScenario(host: string, protocol?: Protocol): boolean {
+export function isMixedContentScenario(host: string, protocol?: Protocol): boolean {
   return globalThis.location?.protocol === 'https:'
     && resolveProtocol(host, protocol) === 'http'
     && isLocalNetworkHost(host);
 }
 
-const MIXED_CONTENT_HINT =
-  'Your browser may be blocking this request (HTTPS → HTTP on a private network). '
-  + 'Check that you\'ve allowed Local Network Access for this site in your browser settings.';
+/**
+ * Return a browser-specific explanation for mixed-content failures.
+ *
+ * Chrome's `targetAddressSpace` triggers its own Local Network Access
+ * prompt, so it gets a short nudge.  Firefox and Safari have **no**
+ * programmatic escape hatch — the only realistic options are switching
+ * to a Chromium-based browser or loading the page over plain HTTP.
+ */
+function mixedContentHintFor(browser: BrowserKind): string {
+  switch (browser) {
+    case 'chrome':
+      return 'Allow the Local Network Access prompt in your browser, then retry.';
+    case 'firefox':
+      return 'Firefox blocks HTTPS pages from connecting to private HTTP servers. '
+        + 'Use a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
+    case 'safari':
+      return 'Safari blocks HTTPS pages from connecting to private HTTP servers. '
+        + 'Use a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
+    default:
+      return 'Your browser may be blocking this request (HTTPS → HTTP on a private network). '
+        + 'Try using a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
+  }
+}
+
+/**
+ * Proactive mixed-content warning for the ConnectForm.
+ *
+ * Returns a user-facing hint string when the host/protocol combination
+ * will trigger mixed-content blocking, or `null` when no warning is
+ * needed (page served over HTTP, target is public, or Chrome which
+ * handles it via the LNA prompt automatically).
+ */
+export function getMixedContentWarning(host: string, protocol?: Protocol): string | null {
+  if (!isMixedContentScenario(host, protocol)) return null;
+  const browser = detectBrowser();
+  // Chrome handles this via targetAddressSpace + LNA prompt — no warning needed
+  if (browser === 'chrome') return null;
+  return mixedContentHintFor(browser);
+}
+
+/**
+ * Check whether a connection error is likely caused by mixed-content
+ * blocking and return a helpful hint, or `null` if unrelated.
+ *
+ * Used by RemoteSession to decorate post-connect errors (e.g. Safari's
+ * `TypeError` when the SSE fetch is silently blocked).
+ */
+export function getMixedContentErrorHint(host: string, protocol?: Protocol): string | null {
+  if (!isMixedContentScenario(host, protocol)) return null;
+  return mixedContentHintFor(detectBrowser());
+}
 
 /**
  * Test whether a host is reachable and the password is valid.
@@ -58,7 +106,7 @@ const MIXED_CONTENT_HINT =
  */
 export async function testConnection(host: string, password: string, protocol?: Protocol): Promise<string | null> {
   const baseUrl = resolveBaseUrl(host, protocol);
-  const mixedContent = isMixedContentScenario(host, protocol);
+  const mixedContentHint = getMixedContentErrorHint(host, protocol);
 
   // 1. Test host reachability (health endpoint — no auth)
   try {
@@ -70,12 +118,12 @@ export async function testConnection(host: string, password: string, protocol?: 
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      return mixedContent
-        ? `Connection timed out. ${MIXED_CONTENT_HINT}`
+      return mixedContentHint
+        ? `Connection timed out. ${mixedContentHint}`
         : 'Connection timed out. Check the address and try again.';
     }
-    return mixedContent
-      ? `Could not reach host. ${MIXED_CONTENT_HINT}`
+    return mixedContentHint
+      ? `Could not reach host. ${mixedContentHint}`
       : 'Could not reach host. Check the address and try again.';
   }
 

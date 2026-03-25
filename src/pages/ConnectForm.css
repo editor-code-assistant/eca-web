@@ -415,6 +415,29 @@
   cursor: not-allowed;
 }
 
+/* ---- Mixed-content warning banner ---- */
+
+.mixed-content-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+  padding: 0.6rem 0.85rem;
+  background: rgba(218, 165, 32, 0.08);
+  border: 1px solid rgba(218, 165, 32, 0.22);
+  border-radius: 0.6rem;
+  color: #d4a017;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.mixed-content-warning-icon {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
 /* ---- Error banner ---- */
 
 .connect-error {

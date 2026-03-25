@@ -7,6 +7,30 @@
  */
 
 export type Protocol = 'http' | 'https';
+export type BrowserKind = 'chrome' | 'firefox' | 'safari' | 'other';
+
+/**
+ * Detect the current browser from the user-agent string.
+ *
+ * We only care about Chrome, Firefox and Safari because each handles
+ * mixed-content / Local Network Access differently:
+ * - Chrome supports `targetAddressSpace` and shows an LNA prompt
+ * - Firefox and Safari block HTTPS→HTTP silently with no API escape hatch
+ *
+ * Order matters: Chrome's UA also contains "Safari", and many browsers
+ * (Edge, Opera, Brave) contain "Chrome", which is fine — they all
+ * inherit Chrome's LNA behaviour.
+ */
+export function detectBrowser(): BrowserKind {
+  const ua = navigator.userAgent;
+  // All Chromium-based browsers (Chrome, Edge, Brave, Opera, Arc…)
+  // include "Chrome/" in their UA and inherit LNA support.
+  if (/Chrome\//.test(ua)) return 'chrome';
+  if (/Firefox\//.test(ua)) return 'firefox';
+  // Real Safari has "Safari/" but NOT "Chrome/"
+  if (/Safari\//.test(ua)) return 'safari';
+  return 'other';
+}
 
 /** RFC 1918 private addresses (192.168.x, 10.x, 172.16-31.x). */
 const PRIVATE_NETWORK_RE =

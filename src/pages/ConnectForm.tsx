@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getMixedContentWarning } from '../bridge/connection';
 import type { Protocol } from '../bridge/utils';
 import { CodeRain } from '../components/CodeRain';
 import './ConnectForm.css';
@@ -40,6 +41,12 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
       /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|127\.|localhost)/i.test(h);
     setProtocol(isPrivate ? 'http' : 'https');
   }, [host]);
+
+  // Proactive warning for Firefox/Safari when HTTPS→HTTP to private IP
+  const mixedContentWarning = useMemo(
+    () => getMixedContentWarning(host.trim(), protocol),
+    [host, protocol],
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,6 +148,13 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
                 onChange={(e) => setPort(e.target.value)}
                 disabled={isConnecting}
               />
+            </div>
+          )}
+
+          {mixedContentWarning && (
+            <div className="mixed-content-warning">
+              <span className="mixed-content-warning-icon">⚠</span>
+              <span>{mixedContentWarning}</span>
             </div>
           )}
 

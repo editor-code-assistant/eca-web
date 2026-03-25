@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EcaRemoteApi } from '../bridge/api';
-import { probePort, testConnection } from '../bridge/connection';
+import { getMixedContentErrorHint, probePort, testConnection } from '../bridge/connection';
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry, WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
@@ -187,7 +187,9 @@ export function RemoteProduct() {
 
     // Only error when zero servers were discovered
     if (progress.found.length === 0) {
-      setFormError('No ECA servers found on ports 7777–7796. Check the host and password.');
+      const mixedHint = getMixedContentErrorHint(host, protocol);
+      const base = 'No ECA servers found on ports 7777–7796.';
+      setFormError(mixedHint ? `${base} ${mixedHint}` : `${base} Check the host and password.`);
       setFormConnecting(false);
       return;
     }

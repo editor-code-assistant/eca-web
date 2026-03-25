@@ -1,5 +1,6 @@
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { getMixedContentErrorHint } from '../bridge/connection';
 import { WebBridge } from '../bridge/transport';
 import type { ReconnectionState } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
@@ -124,7 +125,12 @@ export function RemoteSession({ host, password, protocol, lastChatId, onStatusCh
       bridge.disconnect();
       if (!mountedRef.current) return;
       bridgeRef.current = null;
-      const message = err.message || 'Connection failed';
+      let message = err.message || 'Connection failed';
+      // Decorate generic errors (e.g. Safari's "TypeError") with mixed-content guidance
+      const mixedHint = getMixedContentErrorHint(host, protocol);
+      if (mixedHint) {
+        message = `${message}. ${mixedHint}`;
+      }
       setState({ status: 'error', message });
       onStatusChangeRef.current('error', message);
       onBridgeChangeRef.current?.(null);
