@@ -16,6 +16,7 @@ import { getMixedContentErrorHint, probePort, testConnection } from '../bridge/c
 import type { WebBridge } from '../bridge/transport';
 import type { ChatEntry, WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
+import { ipToSslipHostname, isRawPrivateIp } from '../bridge/utils';
 import { ChatSidebar, ChatSidebarToggle } from '../components/ChatSidebar';
 import {
   consumeDeepLink,
@@ -123,15 +124,20 @@ export function RemoteProduct() {
     setFormConnecting(true);
     setFormError(null);
 
+    // Rewrite raw private IPs to sslip.io hostname for HTTPS connections
+    const effectiveHost = protocol === 'https' && isRawPrivateIp(host)
+      ? ipToSslipHostname(host)
+      : host;
+
     try {
-      const error = await testConnection(host, password, protocol);
+      const error = await testConnection(effectiveHost, password, protocol);
       if (error) {
         setFormError(error);
         return;
       }
 
       // If a connection to this host already exists, switch to it
-      const existing = entries.find((e) => e.host === host);
+      const existing = entries.find((e) => e.host === effectiveHost);
       if (existing) {
         // Update password/protocol in case they changed
         if (existing.password !== password || existing.protocol !== protocol) {
@@ -145,7 +151,7 @@ export function RemoteProduct() {
       }
 
       const id = crypto.randomUUID();
-      setEntries((prev) => [...prev, { id, host, password, protocol, status: 'idle' }]);
+      setEntries((prev) => [...prev, { id, host: effectiveHost, password, protocol, status: 'idle' }]);
       setActiveId(id);
       setShowForm(false);
     } catch {
@@ -197,10 +203,12 @@ export function RemoteProduct() {
     // Create a connection entry for each found port, select the latest (highest port)
     let latestId: string | null = null;
     let latestPort = -1;
+    const shouldRewrite = protocol === 'https' && isRawPrivateIp(host);
     setEntries((prev) => {
       const next = [...prev];
       for (const port of progress.found) {
-        const hostWithPort = `${host}:${port}`;
+        const rawHostWithPort = `${host}:${port}`;
+        const hostWithPort = shouldRewrite ? ipToSslipHostname(rawHostWithPort) : rawHostWithPort;
         const existing = next.find((e) => e.host === hostWithPort);
         if (existing) {
           // Update credentials if needed

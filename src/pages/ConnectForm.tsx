@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { getMixedContentWarning } from '../bridge/connection';
 import type { Protocol } from '../bridge/utils';
+import { ipToSslipHostname, isRawPrivateIp } from '../bridge/utils';
 import { CodeRain } from '../components/CodeRain';
 import './ConnectForm.css';
 
@@ -33,20 +34,18 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
   const [autoDiscover, setAutoDiscover] = useState(true);
   const userToggledProtocol = useRef(false);
 
-  // Auto-detect HTTP for private/local network addresses
-  useEffect(() => {
-    if (userToggledProtocol.current) return;
-    const h = host.trim();
-    const isPrivate =
-      /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|127\.|localhost)/i.test(h);
-    setProtocol(isPrivate ? 'http' : 'https');
-  }, [host]);
-
   // Proactive warning for Firefox/Safari when HTTPS→HTTP to private IP
   const mixedContentWarning = useMemo(
     () => getMixedContentWarning(host.trim(), protocol),
     [host, protocol],
   );
+
+  // Show the resolved sslip.io hostname when connecting over HTTPS to a raw private IP
+  const sslipHint = useMemo(() => {
+    const h = host.trim();
+    if (protocol !== 'https' || !h || !isRawPrivateIp(h)) return null;
+    return ipToSslipHostname(h);
+  }, [host, protocol]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,6 +147,13 @@ export function ConnectForm({ onConnect, onDiscover, error, isConnecting, discov
                 onChange={(e) => setPort(e.target.value)}
                 disabled={isConnecting}
               />
+            </div>
+          )}
+
+          {sslipHint && (
+            <div className="connect-sslip-hint">
+              <span className="connect-sslip-hint-icon">🔒</span>
+              <span>Will connect via <code>{sslipHint}</code></span>
             </div>
           )}
 

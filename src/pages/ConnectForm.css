@@ -415,6 +415,39 @@
   cursor: not-allowed;
 }
 
+/* ---- TLS / sslip.io info hint ---- */
+
+.connect-sslip-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+  padding: 0.6rem 0.85rem;
+  background: rgba(0, 165, 184, 0.06);
+  border: 1px solid rgba(0, 165, 184, 0.18);
+  border-radius: 0.6rem;
+  color: #5cc8d4;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.connect-sslip-hint-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.connect-sslip-hint code {
+  background: rgba(0, 165, 184, 0.1);
+  padding: 0.1em 0.35em;
+  border-radius: 0.25em;
+  font-size: 0.88em;
+  color: #00c8dc;
+  border: 1px solid rgba(0, 165, 184, 0.12);
+  word-break: break-all;
+}
+
 /* ---- Mixed-content warning banner ---- */
 
 .mixed-content-warning {

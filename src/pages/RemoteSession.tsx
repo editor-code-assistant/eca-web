@@ -4,6 +4,7 @@ import { getMixedContentErrorHint } from '../bridge/connection';
 import { WebBridge } from '../bridge/transport';
 import type { ReconnectionState } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
+import { extractSslipIp } from '../bridge/utils';
 import WebviewApp from '@webview/App';
 import './RemoteSession.css';
 
@@ -181,12 +182,19 @@ export function RemoteSession({ host, password, protocol, lastChatId, onStatusCh
   }
 
   // --- Connecting state ---
+  // Show the embedded IP instead of the full sslip hostname for readability
+  const [hostPart, port] = host.split(':');
+  const displayIp = extractSslipIp(hostPart);
+  const displayHost = displayIp
+    ? (port ? `${displayIp}:${port}` : displayIp)
+    : host;
+
   return (
     <SessionErrorBoundary>
       <div className="remote-session-status">
         <div className="remote-session-connecting">
           <div className="remote-session-spinner" />
-          <span>Connecting to {host}…</span>
+          <span>Connecting to {displayHost}…</span>
         </div>
       </div>
     </SessionErrorBoundary>

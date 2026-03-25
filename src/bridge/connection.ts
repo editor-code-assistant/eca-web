@@ -8,7 +8,7 @@
  */
 
 import type { BrowserKind, Protocol } from './utils';
-import { detectBrowser, fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl, resolveProtocol } from './utils';
+import { detectBrowser, fetchWithTimeout, ipToSslipHostname, isLocalNetworkHost, isRawPrivateIp, resolveBaseUrl, resolveProtocol } from './utils';
 
 /**
  * Lightweight probe to check if an ECA server is listening on a given port.
@@ -23,14 +23,18 @@ import { detectBrowser, fetchWithTimeout, isLocalNetworkHost, resolveBaseUrl, re
 export async function probePort(
   host: string,
   port: number,
-  preferredProtocol: Protocol = 'http',
+  preferredProtocol: Protocol = 'https',
 ): Promise<boolean> {
   const protocols: Protocol[] =
     preferredProtocol === 'https' ? ['https', 'http'] : ['http', 'https'];
 
   const results = await Promise.allSettled(
     protocols.map(async (proto) => {
-      const url = `${proto}://${host}:${port}/api/v1/health`;
+      // For HTTPS to a raw private IP, use the sslip.io hostname so the TLS cert matches
+      const effectiveHost = proto === 'https' && isRawPrivateIp(host)
+        ? ipToSslipHostname(`${host}:${port}`).split(':')[0]
+        : host;
+      const url = `${proto}://${effectiveHost}:${port}/api/v1/health`;
       await fetchWithTimeout(url, { mode: 'no-cors' }, 3_000);
     }),
   );

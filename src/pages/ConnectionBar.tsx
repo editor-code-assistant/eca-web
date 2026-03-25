@@ -7,6 +7,7 @@
 
 import type { WorkspaceFolder } from '../bridge/types';
 import type { Protocol } from '../bridge/utils';
+import { extractSslipIp } from '../bridge/utils';
 import type { SessionStatus } from './RemoteSession';
 
 // ---------------------------------------------------------------------------
@@ -123,9 +124,18 @@ function getWorkspaceLabel(
   return { name, fullPath };
 }
 
-/** Truncate a host string to fit in the tab bar. */
+/**
+ * Format a host string for the tab bar.
+ * Converts sslip.io hostnames back to their embedded IP for readability
+ * (e.g. "192-168-1-42.local.eca.dev:7777" → "192.168.1.42:7777").
+ */
 function formatHost(host: string): string {
   const clean = host.replace(/^https?:\/\//, '');
+  const [hostPart, port] = clean.split(':');
+  const ip = extractSslipIp(hostPart);
+  if (ip) {
+    return port ? `${ip}:${port}` : ip;
+  }
   return clean.length > 28 ? clean.slice(0, 26) + '…' : clean;
 }
 
