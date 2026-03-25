@@ -50,7 +50,7 @@ export function isMixedContentScenario(host: string, protocol?: Protocol): boole
  * Chrome's `targetAddressSpace` triggers its own Local Network Access
  * prompt, so it gets a short nudge.  Firefox and Safari have **no**
  * programmatic escape hatch — the only realistic options are switching
- * to a Chromium-based browser or loading the page over plain HTTP.
+ * to a Chromium-based browser or running eca-web locally over HTTP.
  */
 function mixedContentHintFor(browser: BrowserKind): string {
   switch (browser) {
@@ -58,14 +58,14 @@ function mixedContentHintFor(browser: BrowserKind): string {
       return 'Allow the Local Network Access prompt in your browser, then retry.';
     case 'firefox':
       return 'Firefox blocks HTTPS pages from connecting to private HTTP servers. '
-        + 'Try disabling Enhanced Tracking Protection for this site (click the shield icon 🛡️ in the address bar) '
-        + 'or use a Chromium-based browser (Chrome, Edge, Brave).';
+        + 'Try disabling Enhanced Tracking Protection for this site (click the shield icon 🛡️ in the address bar), '
+        + 'use a Chromium-based browser (Chrome, Edge, Brave), or host eca-web locally over HTTP.';
     case 'safari':
       return 'Safari blocks HTTPS pages from connecting to private HTTP servers. '
-        + 'Use a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
+        + 'Use a Chromium-based browser (Chrome, Edge, Brave) or host eca-web locally over HTTP.';
     default:
       return 'Your browser may be blocking this request (HTTPS → HTTP on a private network). '
-        + 'Try using a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
+        + 'Try a Chromium-based browser (Chrome, Edge, Brave) or host eca-web locally over HTTP.';
   }
 }
 
