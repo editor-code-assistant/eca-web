@@ -58,7 +58,8 @@ function mixedContentHintFor(browser: BrowserKind): string {
       return 'Allow the Local Network Access prompt in your browser, then retry.';
     case 'firefox':
       return 'Firefox blocks HTTPS pages from connecting to private HTTP servers. '
-        + 'Use a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
+        + 'Try disabling Enhanced Tracking Protection for this site (click the shield icon 🛡️ in the address bar) '
+        + 'or use a Chromium-based browser (Chrome, Edge, Brave).';
     case 'safari':
       return 'Safari blocks HTTPS pages from connecting to private HTTP servers. '
         + 'Use a Chromium-based browser (Chrome, Edge, Brave) or access this page over HTTP instead.';
