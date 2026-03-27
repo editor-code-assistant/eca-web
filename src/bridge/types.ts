@@ -325,6 +325,7 @@ export type DispatchType =
   | 'chat/contentReceived'
   | 'chat/cleared'
   | 'chat/deleted'
+  | 'chat/opened'
   | 'chat/queryContext'
   | 'chat/queryCommands'
   | 'chat/queryFiles'

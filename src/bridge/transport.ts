@@ -605,6 +605,7 @@ export class WebBridge {
     'chat:status-changed',
     'chat:cleared',
     'chat:deleted',
+    'chat:opened',
   ]);
 
   private handleSSEEvent(event: SSEEvent): void {
@@ -662,6 +663,12 @@ export class WebBridge {
           this.removeChatEntry(data.chatId);
           this.loadedChatIds.delete(data.chatId);
           messageCache.invalidate(this.host, data.chatId);
+          this.notifyChatListChange();
+          break;
+
+        case 'chat:opened':
+          this.dispatch('chat/opened', data);
+          this.upsertChatEntry(data.chatId, { title: data.title });
           this.notifyChatListChange();
           break;
 
