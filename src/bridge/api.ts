@@ -227,6 +227,16 @@ export class EcaRemoteApi {
     return this.request(`/mcp/${encodeURIComponent(name)}/logout`, { method: 'POST' });
   }
 
+  /** Disable an MCP server by name. */
+  async mcpDisableServer(name: string): Promise<void> {
+    return this.request(`/mcp/${encodeURIComponent(name)}/disable`, { method: 'POST' });
+  }
+
+  /** Enable an MCP server by name. */
+  async mcpEnableServer(name: string): Promise<void> {
+    return this.request(`/mcp/${encodeURIComponent(name)}/enable`, { method: 'POST' });
+  }
+
   // ---------------------------------------------------------------------------
   // SSE
   // ---------------------------------------------------------------------------

@@ -152,6 +152,14 @@ export async function handleOutbound(
         await api.mcpLogoutServer(data.name);
         break;
 
+      case 'mcp/disableServer':
+        await api.mcpDisableServer(data.name);
+        break;
+
+      case 'mcp/enableServer':
+        await api.mcpEnableServer(data.name);
+        break;
+
       case 'mcp/updateServer':
         // Respond immediately to prevent webviewSendAndGet from hanging
         // (no REST endpoint for updating MCP server config in web context)
