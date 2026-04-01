@@ -239,6 +239,7 @@ export type OutboundMessage =
   | { type: 'chat/toolCallApprove'; data: { chatId: string; toolCallId: string; save?: string } }
   | { type: 'chat/toolCallReject'; data: { chatId: string; toolCallId: string } }
   | { type: 'chat/promptStop'; data: { chatId: string } }
+  | { type: 'chat/promptSteer'; data: { chatId: string; message: string } }
   | { type: 'chat/delete'; data: { chatId: string } }
   | { type: 'chat/rollback'; data: { chatId: string; contentId: string } }
   | { type: 'chat/clearChat'; data: { chatId: string } }

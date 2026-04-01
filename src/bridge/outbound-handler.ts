@@ -67,6 +67,10 @@ export async function handleOutbound(
         await api.stopPrompt(data.chatId);
         break;
 
+      case 'chat/promptSteer':
+        await api.steerPrompt(data.chatId, data.message);
+        break;
+
       case 'chat/delete':
         // No-op in web: closing a tab should not delete the chat from the
         // server cache.  The webview already removes it locally via resetChat.

@@ -132,6 +132,14 @@ export class EcaRemoteApi {
     });
   }
 
+  /** Steer a running prompt by injecting a message at the next turn boundary. */
+  async steerPrompt(chatId: string, message: string): Promise<void> {
+    return this.request(`/chats/${chatId}/steer`, {
+      method: 'POST',
+      body: { message },
+    });
+  }
+
   /** Approve a pending tool call. Ignores 409 (already handled). */
   async approveToolCall(chatId: string, toolCallId: string, save?: string): Promise<void> {
     return this.request(`/chats/${chatId}/approve/${toolCallId}`, {
