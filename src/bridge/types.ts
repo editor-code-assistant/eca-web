@@ -243,6 +243,9 @@ export type OutboundMessage =
   | { type: 'chat/delete'; data: { chatId: string } }
   | { type: 'chat/rollback'; data: { chatId: string; contentId: string } }
   | { type: 'chat/clearChat'; data: { chatId: string } }
+  | { type: 'chat/addFlag'; data: { chatId: string; contentId: string } }
+  | { type: 'chat/removeFlag'; data: { chatId: string; contentId: string } }
+  | { type: 'chat/fork'; data: { chatId: string; contentId: string } }
   | { type: 'chat/selectedModelChanged'; data: { model: string } }
   | { type: 'chat/selectedAgentChanged'; data: { agent: string } }
   | { type: 'chat/selectedVariantChanged'; data: { variant: string } }

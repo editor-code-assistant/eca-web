@@ -84,6 +84,22 @@ export async function handleOutbound(
         await api.clearChat(data.chatId);
         break;
 
+      case 'chat/addFlag': {
+        const text = window.prompt('Enter flag name');
+        if (text) {
+          await api.addFlag(data.chatId, data.contentId, text);
+        }
+        break;
+      }
+
+      case 'chat/removeFlag':
+        await api.removeFlag(data.chatId, data.contentId);
+        break;
+
+      case 'chat/fork':
+        await api.forkChat(data.chatId, data.contentId);
+        break;
+
       // --- Config changes (apply to current chat) ---
       case 'chat/selectedModelChanged':
         await withCurrentChat(ctx, (chatId) => api.changeModel(chatId, data.model));

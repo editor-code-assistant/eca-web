@@ -170,6 +170,29 @@ export class EcaRemoteApi {
     return this.request(`/chats/${chatId}/clear`, { method: 'POST' });
   }
 
+  /** Add a flag to a chat at a specific content ID. */
+  async addFlag(chatId: string, contentId: string, text: string): Promise<void> {
+    return this.request(`/chats/${chatId}/flag`, {
+      method: 'POST',
+      body: { contentId, text },
+    });
+  }
+
+  /** Remove a flag from a chat. */
+  async removeFlag(chatId: string, contentId: string): Promise<void> {
+    return this.request(`/chats/${chatId}/flag/${contentId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /** Fork a chat from a specific flag. */
+  async forkChat(chatId: string, contentId: string): Promise<void> {
+    return this.request(`/chats/${chatId}/fork`, {
+      method: 'POST',
+      body: { contentId },
+    });
+  }
+
   /** Delete a chat entirely. */
   async deleteChat(chatId: string): Promise<void> {
     return this.request(`/chats/${chatId}`, { method: 'DELETE' });
