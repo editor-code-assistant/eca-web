@@ -222,6 +222,14 @@ export class EcaRemoteApi {
     });
   }
 
+  /** Update chat metadata (title, trust). */
+  async updateChat(chatId: string, params: { title?: string; trust?: boolean }): Promise<void> {
+    return this.request(`/chats/${chatId}/update`, {
+      method: 'POST',
+      body: params,
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Trust
   // ---------------------------------------------------------------------------

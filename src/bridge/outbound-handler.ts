@@ -150,6 +150,15 @@ export async function handleOutbound(
         dispatch('chat/queryFiles', { chatId: data.chatId, files: [] });
         break;
 
+      // --- Chat update ---
+      case 'chat/update': {
+        const { chatId, ...params } = data as { chatId: string; title?: string; trust?: boolean };
+        if (chatId) {
+          await api.updateChat(chatId, params);
+        }
+        break;
+      }
+
       // --- Trust mode ---
       case 'server/setTrust':
         await api.setTrust(data);
