@@ -269,6 +269,25 @@ export class EcaRemoteApi {
   }
 
   // ---------------------------------------------------------------------------
+  // Background Jobs
+  // ---------------------------------------------------------------------------
+
+  /** List all background jobs. */
+  async jobsList(): Promise<unknown> {
+    return this.request('/jobs');
+  }
+
+  /** Read output from a background job. */
+  async jobsReadOutput(jobId: string): Promise<unknown> {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/output`);
+  }
+
+  /** Kill a running background job. */
+  async jobsKill(jobId: string): Promise<unknown> {
+    return this.request(`/jobs/${encodeURIComponent(jobId)}/kill`, { method: 'POST' });
+  }
+
+  // ---------------------------------------------------------------------------
   // SSE
   // ---------------------------------------------------------------------------
 

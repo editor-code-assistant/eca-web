@@ -189,6 +189,25 @@ export async function handleOutbound(
         }
         break;
 
+      // --- Background Jobs ---
+      case 'jobs/list': {
+        const jobsResult = await api.jobsList();
+        dispatch('jobs/list', { requestId: data.requestId, ...(jobsResult as object) });
+        break;
+      }
+
+      case 'jobs/readOutput': {
+        const outputResult = await api.jobsReadOutput(data.jobId);
+        dispatch('jobs/readOutput', { requestId: data.requestId, ...(outputResult as object) });
+        break;
+      }
+
+      case 'jobs/kill': {
+        const killResult = await api.jobsKill(data.jobId);
+        dispatch('jobs/kill', { requestId: data.requestId, ...(killResult as object) });
+        break;
+      }
+
       // --- Ignored (no web equivalent) ---
       case 'editor/openFile':
       case 'editor/openGlobalConfig':

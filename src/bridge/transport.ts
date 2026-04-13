@@ -719,6 +719,10 @@ export class WebBridge {
           break;
         }
 
+        case 'jobs:updated':
+          this.dispatch('jobs/updated', data);
+          break;
+
         case 'session:disconnecting':
           console.warn('[Bridge] Server shutting down:', data.reason);
           this.dispatch('server/statusChanged', 'Stopped');

@@ -167,7 +167,8 @@ export type SSEEventType =
   | 'chat:status-changed'
   | 'config:updated'
   | 'tool:server-updated'
-  | 'trust:updated';
+  | 'trust:updated'
+  | 'jobs:updated';
 
 export interface SSESessionConnectedPayload {
   workspaceFolders?: WorkspaceFolder[];
@@ -265,7 +266,10 @@ export type OutboundMessage =
   | { type: 'mcp/connectServer'; data: { name: string } }
   | { type: 'mcp/logoutServer'; data: { name: string } }
   | { type: 'mcp/updateServer'; data: { requestId?: string } }
-  | { type: 'server/setTrust'; data: boolean };
+  | { type: 'server/setTrust'; data: boolean }
+  | { type: 'jobs/list'; data: { requestId?: string } }
+  | { type: 'jobs/readOutput'; data: { requestId?: string; jobId: string } }
+  | { type: 'jobs/kill'; data: { requestId?: string; jobId: string } };
 
 export interface UserPromptData {
   chatId?: string;
@@ -334,4 +338,8 @@ export type DispatchType =
   | 'chat/queryCommands'
   | 'chat/queryFiles'
   | 'editor/readInput'
-  | 'editor/saveClipboardImage';
+  | 'editor/saveClipboardImage'
+  | 'jobs/updated'
+  | 'jobs/list'
+  | 'jobs/readOutput'
+  | 'jobs/kill';
