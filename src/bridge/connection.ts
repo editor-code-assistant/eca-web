@@ -14,8 +14,9 @@ import { detectBrowser, fetchWithTimeout, ipToSslipHostname, isLocalNetworkHost,
  * Lightweight probe to check if an ECA server is listening on a given port.
  *
  * Used by auto-discovery to quickly scan a port range without requiring
- * full authentication. Uses `mode: 'no-cors'` so we only need to know
- * "is something responding?" — the opaque response is fine for discovery.
+ * full authentication. Performs a real CORS-enabled health check and
+ * validates the JSON response, so reverse-proxy ports without an actual
+ * ECA backend (e.g. Tailscale `serve`) are correctly filtered out.
  *
  * Tries both HTTP and HTTPS in parallel to handle protocol mismatches
  * (e.g. user selected HTTPS but server runs HTTP, or vice-versa).
@@ -35,7 +36,10 @@ export async function probePort(
         ? ipToSslipHostname(`${host}:${port}`).split(':')[0]
         : host;
       const url = `${proto}://${effectiveHost}:${port}/api/v1/health`;
-      await fetchWithTimeout(url, { mode: 'no-cors' }, 3_000);
+      const res = await fetchWithTimeout(url, {}, 3_000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      if (body?.status !== 'ok') throw new Error('Not an ECA server');
     }),
   );
   return results.some((r) => r.status === 'fulfilled');
