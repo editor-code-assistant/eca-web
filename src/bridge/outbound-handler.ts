@@ -100,6 +100,10 @@ export async function handleOutbound(
         await api.forkChat(data.chatId, data.contentId);
         break;
 
+      case 'chat/answerQuestion':
+        await api.answerQuestion(data.requestId, data.answer, data.cancelled);
+        break;
+
       // --- Config changes (apply to current chat) ---
       case 'chat/selectedModelChanged':
         await withCurrentChat(ctx, (chatId) => api.changeModel(chatId, data.model));

@@ -165,6 +165,7 @@ export type SSEEventType =
   | 'chat:cleared'
   | 'chat:deleted'
   | 'chat:status-changed'
+  | 'chat:ask-question'
   | 'config:updated'
   | 'tool:server-updated'
   | 'trust:updated'
@@ -247,6 +248,7 @@ export type OutboundMessage =
   | { type: 'chat/addFlag'; data: { chatId: string; contentId: string } }
   | { type: 'chat/removeFlag'; data: { chatId: string; contentId: string } }
   | { type: 'chat/fork'; data: { chatId: string; contentId: string } }
+  | { type: 'chat/answerQuestion'; data: { requestId: string; answer: string | null; cancelled: boolean } }
   | { type: 'chat/selectedModelChanged'; data: { model: string } }
   | { type: 'chat/selectedAgentChanged'; data: { agent: string } }
   | { type: 'chat/selectedVariantChanged'; data: { variant: string } }
@@ -334,6 +336,7 @@ export type DispatchType =
   | 'chat/cleared'
   | 'chat/deleted'
   | 'chat/opened'
+  | 'chat/askQuestion'
   | 'chat/queryContext'
   | 'chat/queryCommands'
   | 'chat/queryFiles'

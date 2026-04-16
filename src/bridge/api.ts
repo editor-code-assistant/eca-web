@@ -231,6 +231,18 @@ export class EcaRemoteApi {
   }
 
   // ---------------------------------------------------------------------------
+  // Ask Question (chat/askQuestion flow)
+  // ---------------------------------------------------------------------------
+
+  /** Answer a pending question from the server (identified by requestId). */
+  async answerQuestion(requestId: string, answer: string | null, cancelled?: boolean): Promise<void> {
+    return this.request('/answer', {
+      method: 'POST',
+      body: { requestId, answer: answer ?? null, cancelled: !!cancelled },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Trust
   // ---------------------------------------------------------------------------
 

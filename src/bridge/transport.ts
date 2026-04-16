@@ -719,6 +719,10 @@ export class WebBridge {
           break;
         }
 
+        case 'chat:ask-question':
+          this.dispatch('chat/askQuestion', data);
+          break;
+
         case 'jobs:updated':
           this.dispatch('jobs/updated', data);
           break;
