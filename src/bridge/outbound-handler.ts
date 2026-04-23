@@ -221,6 +221,46 @@ export async function handleOutbound(
         break;
       }
 
+      // --- Global config (not available in web — respond cleanly) ---
+      //
+      // These two messages are sent via webviewSendAndGet, which waits
+      // on a matching requestId response for up to 30 s before timing
+      // out. Returning an error-shaped payload immediately lets the
+      // Settings → Global Config tab render a graceful "not available"
+      // state instead of spinning on "Resolving path…".
+      case 'editor/readGlobalConfig':
+        dispatch('editor/readGlobalConfig', {
+          requestId: data.requestId,
+          contents: '',
+          path: '',
+          exists: false,
+          error: 'Editing the global config is not available in the web client.',
+        });
+        break;
+
+      case 'editor/writeGlobalConfig':
+        dispatch('editor/writeGlobalConfig', {
+          requestId: data.requestId,
+          ok: false,
+          error: 'Editing the global config is not available in the web client.',
+        });
+        break;
+
+      // --- Logs tab (no local log buffer in a browser) ---
+      //
+      // A future enhancement could stream remote server logs over SSE
+      // and feed `logs/appended`, but today we just surface an empty
+      // buffer so LogsTab renders its "No logs yet" empty state
+      // instead of an infinite spinner. The other two are genuinely
+      // no-ops on web — there's nothing to clear and no folder to open.
+      case 'logs/snapshot':
+        dispatch('logs/snapshot', []);
+        break;
+
+      case 'logs/clear':
+      case 'logs/openFolder':
+        break;
+
       // --- Ignored (no web equivalent) ---
       case 'editor/openFile':
       case 'editor/openGlobalConfig':
