@@ -19,9 +19,14 @@ export type BrowserKind = 'chrome' | 'firefox' | 'safari' | 'other';
  *
  * Order matters: Chrome's UA also contains "Safari", and many browsers
  * (Edge, Opera, Brave) contain "Chrome", which is fine — they all
- * inherit Chrome's LNA behaviour.
+ * inherit Chrome's LNA behaviour. iOS is special-cased FIRST because
+ * Apple requires every iOS browser (including Chrome — UA "CriOS/...
+ * Chrome/... Safari/...") to use the WebKit rendering engine. iOS
+ * Chrome therefore has zero LNA support and must be treated as Safari
+ * for mixed-content guidance.
  */
 export function detectBrowser(): BrowserKind {
+  if (isIosDevice()) return 'safari';
   const ua = navigator.userAgent;
   // All Chromium-based browsers (Chrome, Edge, Brave, Opera, Arc…)
   // include "Chrome/" in their UA and inherit LNA support.
@@ -30,6 +35,25 @@ export function detectBrowser(): BrowserKind {
   // Real Safari has "Safari/" but NOT "Chrome/"
   if (/Safari\//.test(ua)) return 'safari';
   return 'other';
+}
+
+/**
+ * True when the current device is an iPhone, iPad, or iPod (regardless of
+ * which "browser" is running — they all use WebKit on Apple's platform).
+ *
+ * Also detects iPadOS 13+ "Desktop Mode", which advertises itself as
+ * macOS but exposes touch via `navigator.maxTouchPoints > 1` and runs
+ * on the WebKit engine.
+ */
+function isIosDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPadOS 13+ pretends to be macOS in its UA. Touch support + Apple
+  // vendor string is the official escape hatch.
+  return navigator.platform === 'MacIntel'
+    && typeof navigator.maxTouchPoints === 'number'
+    && navigator.maxTouchPoints > 1;
 }
 
 /** RFC 1918 private addresses (192.168.x, 10.x, 172.16-31.x). */

@@ -230,13 +230,42 @@ function ReconnectionBanner({ state }: { state: ReconnectionState }) {
   }
 
   // --- Reconnecting ---
+  return <ReconnectingBannerBody state={state} />;
+}
+
+/**
+ * Reconnecting banner body — splits out so we can drive a real-time countdown
+ * via local state. The previous implementation rendered a static seconds value
+ * from props, so the user saw "1s" frozen for the full backoff window and the
+ * banner appeared dead even when reconnection was actively progressing.
+ */
+function ReconnectingBannerBody({ state }: { state: ReconnectionState }) {
+  const [remainingMs, setRemainingMs] = useState<number>(state.nextRetryMs ?? 0);
+
+  useEffect(() => {
+    if (!state.nextRetryMs || state.nextRetryMs <= 0) {
+      setRemainingMs(0);
+      return;
+    }
+    const start = Date.now();
+    const total = state.nextRetryMs;
+    setRemainingMs(total);
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, total - (Date.now() - start));
+      setRemainingMs(remaining);
+      if (remaining <= 0) clearInterval(interval);
+    }, 250);
+    return () => clearInterval(interval);
+    // Re-run whenever a new attempt arrives (each schedule emits a fresh nextRetryMs)
+  }, [state.nextRetryMs, state.attempt]);
+
   return (
     <div className="reconnect-banner reconnect-banner--reconnecting">
       <div className="reconnect-banner__spinner" />
       <span className="reconnect-banner__text">
         Connection lost · Reconnecting
         {state.attempt > 1 ? ` (attempt ${state.attempt})` : ''}
-        {state.nextRetryMs ? ` · ${Math.ceil(state.nextRetryMs / 1000)}s` : '…'}
+        {remainingMs > 0 ? ` · ${Math.ceil(remainingMs / 1000)}s` : '…'}
       </span>
       {state.retryNow && (
         <button className="reconnect-banner__btn" onClick={state.retryNow}>

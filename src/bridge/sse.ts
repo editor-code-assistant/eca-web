@@ -38,6 +38,15 @@ export class SSEClient {
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimeoutMs: number;
   private running = false;
+  /**
+   * Listener that resets the heartbeat timer when the page returns to the
+   * foreground. iOS WebKit (and Safari in low-power mode) coalesces fetch
+   * stream chunks while a tab is backgrounded, which can starve the
+   * heartbeat for tens of seconds even when the underlying TCP connection
+   * is healthy. Without this, switching back to the tab on iPhone reliably
+   * trips a false-positive disconnect.
+   */
+  private visibilityHandler: (() => void) | null = null;
 
   constructor(
     url: string,
@@ -81,6 +90,7 @@ export class SSEClient {
     }
 
     this.reader = response.body.getReader();
+    this.installVisibilityHandler();
     this.resetHeartbeatTimer();
     this.readLoop();
   }
@@ -94,10 +104,36 @@ export class SSEClient {
   /** Release resources without changing the `running` flag. */
   private cleanUp(): void {
     this.clearHeartbeatTimer();
+    this.removeVisibilityHandler();
     this.abortController?.abort();
     this.reader?.cancel().catch(() => {});
     this.reader = null;
     this.abortController = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Visibility (iOS background-tab tolerance)
+  // ---------------------------------------------------------------------------
+
+  private installVisibilityHandler(): void {
+    if (typeof document === 'undefined' || this.visibilityHandler) return;
+    this.visibilityHandler = () => {
+      if (this.running && !document.hidden) {
+        // Page returned to foreground. Reset the heartbeat clock so the
+        // backlog of throttled chunks can flush without us declaring the
+        // connection dead. Real disconnects will still trip the timer
+        // afterward because no chunks will arrive at all.
+        this.resetHeartbeatTimer();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  private removeVisibilityHandler(): void {
+    if (this.visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    }
+    this.visibilityHandler = null;
   }
 
   // ---------------------------------------------------------------------------

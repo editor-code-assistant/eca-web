@@ -291,7 +291,10 @@ export class WebBridge {
 
   /**
    * Manually trigger a reconnection attempt (e.g. from a "Retry Now" button).
-   * Resets the attempt counter and starts a fresh reconnection cycle.
+   *
+   * Performs health check + SSE reconnect IMMEDIATELY (no per-attempt delay)
+   * so the user sees instant feedback. If it fails, falls back to the
+   * scheduled exponential-backoff loop.
    */
   retryNow(): void {
     if (this.disposed) return;
@@ -302,21 +305,62 @@ export class WebBridge {
       this.reconnectTimer = null;
     }
 
-    this.reconnectAttempt = 0;
+    this.reconnectAttempt = 1;
     this.reconnecting = true;
-    this.attemptReconnect();
+
+    // Show "reconnecting now" with no countdown — we are acting this very tick.
+    this.notifyReconnection({
+      status: 'reconnecting',
+      attempt: this.reconnectAttempt,
+      retryNow: () => this.retryNow(),
+    });
+
+    void (async () => {
+      try {
+        await this.api.health();
+        if (this.disposed) return;
+
+        await this.reconnectSSE();
+        if (this.disposed) return;
+
+        console.log('[Bridge] Reconnected via Retry Now');
+        this.reconnecting = false;
+        this.reconnectAttempt = 0;
+
+        await this.syncAfterReconnect();
+
+        this.notifyReconnection({
+          status: 'reconnected',
+          attempt: 0,
+        });
+      } catch (err) {
+        console.warn('[Bridge] Retry Now failed, falling back to scheduled reconnect:', err);
+        if (!this.disposed) {
+          // Reset to 0 so attemptReconnect's first scheduled try is attempt #1
+          this.reconnectAttempt = 0;
+          this.attemptReconnect();
+        }
+      }
+    })();
   }
 
   /**
    * Re-open the SSE stream (without the full connect() ceremony).
    * Rejects if the handshake times out or the connection fails.
+   *
+   * The handshake is considered successful as soon as the FIRST event of any
+   * kind arrives on the new stream — not just `session:connected`. The server
+   * does not always re-emit `session:connected` on a fresh /events connection
+   * for an already-known session; if we waited only for that, live data could
+   * stream through `handleSSEEvent` (so chat appears to be working) while the
+   * promise never resolved and the "Connection lost" banner stuck forever.
    */
   private reconnectSSE(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error('SSE reconnect timeout')),
-        SSE_CONNECT_TIMEOUT_MS,
-      );
+      let resolved = false;
+      const timeout = setTimeout(() => {
+        if (!resolved) reject(new Error('SSE reconnect timeout'));
+      }, SSE_CONNECT_TIMEOUT_MS);
 
       // Disconnect old SSE if it still exists
       this.sse?.disconnect();
@@ -325,17 +369,23 @@ export class WebBridge {
         this.api.sseUrl(),
         this.api.authPassword,
         (event) => {
-          if (event.event === 'session:connected' && !this.connected) {
+          // First event on the new stream — promote to "connected" and resolve.
+          if (!resolved) {
+            resolved = true;
             clearTimeout(timeout);
-            this.handleSessionConnected(event);
             this.connected = true;
             resolve();
+          }
+
+          if (event.event === 'session:connected') {
+            this.handleSessionConnected(event);
           } else {
             this.handleSSEEvent(event);
           }
         },
         (error) => {
-          if (!this.connected) {
+          if (!resolved) {
+            resolved = true;
             clearTimeout(timeout);
             reject(error);
           } else {
@@ -354,8 +404,11 @@ export class WebBridge {
       );
 
       this.sse.connect().catch((err) => {
-        clearTimeout(timeout);
-        reject(err);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(err);
+        }
       });
     });
   }
