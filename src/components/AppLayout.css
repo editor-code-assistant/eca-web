@@ -1,6 +1,17 @@
+/* Defensive viewport clip — prevents iOS Safari's horizontal rubber-band
+ * if any descendant briefly overflows the viewport during reflow. The
+ * webview's own overflow rules (pre, code, message wrappers) are the
+ * primary fix; this is a belt-and-suspenders for the browser shell. */
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
 .app-layout {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;

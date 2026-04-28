@@ -67,11 +67,17 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Reconnection banner — slim top bar, chat stays fully visible underneath.
- * Three visual states: reconnecting (amber), reconnected (green), failed (red).
+ * Reconnection banner — slim top overlay so the chat does not reflow when
+ * the banner mounts/unmounts. Anchored to the .remote-session container
+ * (which has position: relative). Three visual states: reconnecting (amber),
+ * reconnected (green), failed (red).
  * ------------------------------------------------------------------------- */
 
 .reconnect-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -82,7 +88,7 @@
   font-size: 0.8rem;
   font-weight: 500;
   z-index: 1000;
-  flex-shrink: 0;
+  pointer-events: auto;
   animation: reconnect-slide-in 0.25s ease-out;
 }
 
