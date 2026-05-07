@@ -104,17 +104,19 @@ export async function handleOutbound(
         await api.answerQuestion(data.requestId, data.answer, data.cancelled);
         break;
 
-      // --- Config changes (apply to current chat) ---
+      // --- Config changes (apply to the chat the webview targets, falling
+      //     back to the current chat for older webview versions that don't
+      //     forward chatId in the message). ---
       case 'chat/selectedModelChanged':
-        await withCurrentChat(ctx, (chatId) => api.changeModel(chatId, data.model));
+        await withTargetChat(ctx, data.chatId, (chatId) => api.changeModel(chatId, data.model));
         break;
 
       case 'chat/selectedAgentChanged':
-        await withCurrentChat(ctx, (chatId) => api.changeAgent(chatId, data.agent));
+        await withTargetChat(ctx, data.chatId, (chatId) => api.changeAgent(chatId, data.agent));
         break;
 
       case 'chat/selectedVariantChanged':
-        await withCurrentChat(ctx, (chatId) => api.changeVariant(chatId, data.variant));
+        await withTargetChat(ctx, data.chatId, (chatId) => api.changeVariant(chatId, data.variant));
         break;
 
       // --- Editor operations ---
@@ -303,14 +305,17 @@ async function handleUserPrompt(data: UserPromptData, ctx: OutboundContext): Pro
 }
 
 /**
- * Run an action against the current chat ID, silently catching errors.
- * Used for config changes (model/agent/variant) which are best-effort.
+ * Run an action against an explicit chat ID when the webview provides one,
+ * otherwise fall back to the current session-wide chat ID. Errors are
+ * silently caught — these config changes (model/agent/variant) are
+ * best-effort and must not break the UI.
  */
-async function withCurrentChat(
+async function withTargetChat(
   ctx: OutboundContext,
+  explicitChatId: string | undefined,
   action: (chatId: string) => Promise<void>,
 ): Promise<void> {
-  const chatId = ctx.getCurrentChatId();
+  const chatId = explicitChatId || ctx.getCurrentChatId();
   if (chatId) {
     await action(chatId).catch(() => {});
   }

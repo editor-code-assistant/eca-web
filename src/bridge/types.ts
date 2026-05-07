@@ -249,9 +249,9 @@ export type OutboundMessage =
   | { type: 'chat/removeFlag'; data: { chatId: string; contentId: string } }
   | { type: 'chat/fork'; data: { chatId: string; contentId: string } }
   | { type: 'chat/answerQuestion'; data: { requestId: string; answer: string | null; cancelled: boolean } }
-  | { type: 'chat/selectedModelChanged'; data: { model: string } }
-  | { type: 'chat/selectedAgentChanged'; data: { agent: string } }
-  | { type: 'chat/selectedVariantChanged'; data: { variant: string } }
+  | { type: 'chat/selectedModelChanged'; data: { model: string; chatId?: string; variant?: string } }
+  | { type: 'chat/selectedAgentChanged'; data: { agent: string; chatId?: string } }
+  | { type: 'chat/selectedVariantChanged'; data: { variant: string; chatId?: string } }
   | { type: 'editor/openUrl'; data: { url: string } }
   | { type: 'editor/openFile'; data: unknown }
   | { type: 'editor/openGlobalConfig'; data: unknown }
