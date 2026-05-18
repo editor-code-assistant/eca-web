@@ -268,6 +268,8 @@ export type OutboundMessage =
   | { type: 'mcp/connectServer'; data: { name: string } }
   | { type: 'mcp/logoutServer'; data: { name: string } }
   | { type: 'mcp/updateServer'; data: { requestId?: string } }
+  | { type: 'mcp/addServer'; data: { requestId?: string; name: string; [k: string]: unknown } }
+  | { type: 'mcp/removeServer'; data: { requestId?: string; name: string } }
   | { type: 'server/setTrust'; data: boolean }
   | { type: 'jobs/list'; data: { requestId?: string } }
   | { type: 'jobs/readOutput'; data: { requestId?: string; jobId: string } }
@@ -332,6 +334,9 @@ export type DispatchType =
   | 'server/setTrust'
   | 'config/updated'
   | 'tool/serversUpdated'
+  | 'tool/serverRemoved'
+  | 'mcp/addServer'
+  | 'mcp/removeServer'
   | 'chat/contentReceived'
   | 'chat/cleared'
   | 'chat/deleted'

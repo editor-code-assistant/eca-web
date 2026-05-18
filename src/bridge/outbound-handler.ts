@@ -204,6 +204,24 @@ export async function handleOutbound(
         }
         break;
 
+      case 'mcp/addServer':
+      case 'mcp/removeServer':
+        // The remote ECA server doesn't expose REST endpoints for
+        // add/remove (these mutate a config file on the host running the
+        // server). Respond with an error-shaped payload so the form in
+        // the React webview surfaces a clear "not supported" message
+        // inline instead of spinning forever.
+        if (data.requestId) {
+          dispatch(type, {
+            requestId: data.requestId,
+            error: {
+              code: 'not_supported',
+              message: 'Adding/removing MCP servers is not available in the web client.',
+            },
+          });
+        }
+        break;
+
       // --- Background Jobs ---
       case 'jobs/list': {
         const jobsResult = await api.jobsList();
