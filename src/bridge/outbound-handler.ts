@@ -222,6 +222,32 @@ export async function handleOutbound(
         }
         break;
 
+      // --- Chat resume picker (not available in web — respond cleanly) ---
+      //
+      // The remote ECA server doesn't expose REST endpoints for
+      // `chat/list` (would need a JSON-RPC method that lists persisted
+      // chats with summary metadata) or `chat/open` (which depends on
+      // the server's notification cascade — `chat/cleared` +
+      // `chat/opened` + `chat/contentReceived` — that the SSE channel
+      // doesn't replay on demand). Return an error envelope on both
+      // so the webview's resume picker sees `result.error` and stays
+      // hidden — `listChats` thunk handles this by setting
+      // `resumableChats = []`, which hides the resume-hint affordance
+      // entirely. Users on the web client just don't see the picker,
+      // rather than seeing a broken affordance that times out.
+      case 'chat/list':
+      case 'chat/open':
+        if (data.requestId) {
+          dispatch(type, {
+            requestId: data.requestId,
+            error: {
+              code: 'not_supported',
+              message: 'Resuming previous chats is not available in the web client.',
+            },
+          });
+        }
+        break;
+
       // --- Background Jobs ---
       case 'jobs/list': {
         const jobsResult = await api.jobsList();
