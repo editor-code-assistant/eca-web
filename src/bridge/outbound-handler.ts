@@ -72,8 +72,10 @@ export async function handleOutbound(
         break;
 
       case 'chat/delete':
-        // No-op in web: closing a tab should not delete the chat from the
-        // server cache.  The webview already removes it locally via resetChat.
+        // Mirror eca-vscode: forward to the server to delete the chat
+        // entirely. The SSE `chat:deleted` event keeps the sidebar and
+        // message cache in sync.
+        await api.deleteChat(data.chatId);
         break;
 
       case 'chat/rollback':

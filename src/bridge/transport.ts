@@ -530,6 +530,61 @@ export class WebBridge {
     this.dispatch('chat/createNewChat', undefined);
   }
 
+  /**
+   * Clear a chat's message history while keeping the chat itself.
+   *
+   * Calls the REST endpoint and mirrors the `chat:cleared` SSE handler
+   * locally for an immediate UI update — the server's SSE echo (if any)
+   * is idempotent.
+   */
+  async clearChatHistory(chatId: string): Promise<void> {
+    try {
+      await this.api.clearChat(chatId);
+    } catch (err) {
+      console.error('[Bridge] Failed to clear chat history:', err);
+      return;
+    }
+    this.dispatch('chat/cleared', { chatId, messages: true });
+    this.loadedChatIds.delete(chatId);
+    messageCache.invalidate(this.host, chatId);
+  }
+
+  /**
+   * Close (delete) a chat on the server. Mirrors eca-vscode: the chat is
+   * removed entirely via `DELETE /chats/:id` with no confirmation prompt.
+   *
+   * When the closed chat is the active one, selection advances to the most
+   * recent remaining chat (or a fresh chat if none remain) so the webview
+   * doesn't keep showing the deleted chat. Local cleanup mirrors the
+   * `chat:deleted` SSE handler; the server's SSE echo (if any) is idempotent.
+   */
+  async closeChat(chatId: string): Promise<void> {
+    try {
+      await this.api.deleteChat(chatId);
+    } catch (err) {
+      console.error('[Bridge] Failed to close chat:', err);
+      return;
+    }
+
+    // If the active chat is being closed, switch away first so the webview
+    // doesn't keep rendering a chat that no longer exists.
+    if (this.currentChatId === chatId) {
+      const next = [...this.chatEntries].reverse().find((e) => e.id !== chatId);
+      if (next) {
+        await this.selectChat(next.id);
+      } else {
+        this.currentChatId = null;
+        this.newChat();
+      }
+    }
+
+    this.dispatch('chat/deleted', chatId);
+    this.removeChatEntry(chatId);
+    this.loadedChatIds.delete(chatId);
+    messageCache.invalidate(this.host, chatId);
+    this.notifyChatListChange();
+  }
+
 
 
   // ---------------------------------------------------------------------------

@@ -69,6 +69,20 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
     onMobileClose();
   }, [bridge, onMobileClose]);
 
+  const handleClearHistory = useCallback(
+    (chatId: string) => {
+      bridge?.clearChatHistory(chatId);
+    },
+    [bridge],
+  );
+
+  const handleCloseChat = useCallback(
+    (chatId: string) => {
+      bridge?.closeChat(chatId);
+    },
+    [bridge],
+  );
+
 
 
   return (
@@ -113,18 +127,40 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
             </div>
           ) : (
             chats.map((chat) => (
-              <button
+              <div
                 key={chat.id}
                 className={`chat-sidebar-item ${chat.id === selectedId ? 'active' : ''}`}
-                onClick={() => handleSelect(chat.id)}
-                title={chat.title}
               >
-                <i className="codicon codicon-comment chat-sidebar-icon" />
-                <span className="chat-sidebar-label">{chat.title}</span>
-                {chat.status === 'running' && (
-                  <span className="chat-sidebar-status running" />
-                )}
-              </button>
+                <button
+                  className="chat-sidebar-item-main"
+                  onClick={() => handleSelect(chat.id)}
+                  title={chat.title}
+                >
+                  <i className="codicon codicon-comment chat-sidebar-icon" />
+                  <span className="chat-sidebar-label">{chat.title}</span>
+                  {chat.status === 'running' && (
+                    <span className="chat-sidebar-status running" />
+                  )}
+                </button>
+                <div className="chat-sidebar-item-actions">
+                  <button
+                    className="chat-sidebar-action"
+                    onClick={(e) => { e.stopPropagation(); handleClearHistory(chat.id); }}
+                    title="Clear messages"
+                    aria-label="Clear chat messages"
+                  >
+                    <i className="codicon codicon-trash" />
+                  </button>
+                  <button
+                    className="chat-sidebar-action chat-sidebar-action-close"
+                    onClick={(e) => { e.stopPropagation(); handleCloseChat(chat.id); }}
+                    title="Close chat"
+                    aria-label="Close chat"
+                  >
+                    <i className="codicon codicon-close" />
+                  </button>
+                </div>
+              </div>
             ))
           )}
         </div>

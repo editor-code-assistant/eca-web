@@ -125,18 +125,27 @@
 .chat-sidebar-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  color: #8a9ab0;
+  transition: background 0.12s, color 0.12s;
+  position: relative;
+}
+
+/* Main clickable area (select chat) */
+.chat-sidebar-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.25rem 0.5rem 0.75rem;
   border: none;
   background: transparent;
-  color: #8a9ab0;
+  color: inherit;
   font-size: 0.8rem;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  position: relative;
 }
 
 .chat-sidebar-item:hover {
@@ -199,8 +208,16 @@
   50% { opacity: 0.3; }
 }
 
-/* Delete button (on hover) */
-.chat-sidebar-delete {
+/* Per-chat actions (revealed on hover / active) */
+.chat-sidebar-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding-right: 0.4rem;
+  flex-shrink: 0;
+}
+
+.chat-sidebar-action {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -210,19 +227,25 @@
   border-radius: 0.2rem;
   background: transparent;
   color: #5a6a7a;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   opacity: 0;
   flex-shrink: 0;
   transition: opacity 0.12s, background 0.12s, color 0.12s;
 }
 
-.chat-sidebar-item:hover .chat-sidebar-delete {
-  opacity: 0.7;
+.chat-sidebar-item:hover .chat-sidebar-action,
+.chat-sidebar-item.active .chat-sidebar-action {
+  opacity: 0.65;
 }
 
-.chat-sidebar-delete:hover {
+.chat-sidebar-action:hover {
   opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e4ea;
+}
+
+.chat-sidebar-action-close:hover {
   background: rgba(241, 76, 76, 0.15);
   color: #f14c4c;
 }
