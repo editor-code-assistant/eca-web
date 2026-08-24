@@ -76,9 +76,13 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
     [bridge],
   );
 
-  const handleCloseChat = useCallback(
-    (chatId: string) => {
-      bridge?.closeChat(chatId);
+  const handleDeleteChat = useCallback(
+    (chatId: string, title: string) => {
+      // The sidebar lists the server's chat history, so removing an entry
+      // permanently deletes the chat. Confirm before doing so.
+      if (window.confirm(`Permanently delete chat "${title}"?`)) {
+        bridge?.closeChat(chatId);
+      }
     },
     [bridge],
   );
@@ -153,9 +157,9 @@ export function ChatSidebar({ bridge, chats = [], selectedId, workspaceFolders =
                   </button>
                   <button
                     className="chat-sidebar-action chat-sidebar-action-close"
-                    onClick={(e) => { e.stopPropagation(); handleCloseChat(chat.id); }}
-                    title="Close chat"
-                    aria-label="Close chat"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id, chat.title); }}
+                    title="Delete chat"
+                    aria-label="Delete chat"
                   >
                     <i className="codicon codicon-close" />
                   </button>
