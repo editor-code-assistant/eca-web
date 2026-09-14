@@ -18,7 +18,7 @@
  */
 
 import { EcaRemoteApi } from './api';
-import { chatToRestoreEvents } from './chat-restore';
+import { chatToPendingQuestions, chatToRestoreEvents } from './chat-restore';
 import { messageCache } from './message-cache';
 import { handleOutbound, type OutboundContext } from './outbound-handler';
 import { SSEClient, type SSEEvent } from './sse';
@@ -91,6 +91,9 @@ export class WebBridge {
    */
   private loadedChatIds = new Set<string>();
 
+  /** Questions received during a lazy history load must wait for chat creation. */
+  private loadingChatIds = new Set<string>();
+
   /**
    * True after `disconnect()` has been called. Checked after every async
    * boundary in `connect()` so that orphaned bridges (e.g. from React
@@ -109,8 +112,8 @@ export class WebBridge {
   private restoring = false;
 
   /**
-   * SSE events queued while `restoring` is true. These are replayed
-   * in order after restore completes via `flushRestoreQueue()`.
+   * SSE events queued while restoring or lazily loading a chat. These are replayed
+   * in order after loading completes via `flushRestoreQueue()`.
    */
   private restoreQueue: SSEEvent[] = [];
 
@@ -683,6 +686,9 @@ export class WebBridge {
   // ---------------------------------------------------------------------------
 
   private handleSessionConnected(event: SSEEvent): void {
+    // History cached before this connection cannot tell us which questions are
+    // still pending. Invalidate all chats for this host, including lazy loads.
+    messageCache.invalidateAll(this.host);
     try {
       const data: SSESessionConnectedPayload = JSON.parse(event.data);
       this.sessionState = {
@@ -714,6 +720,7 @@ export class WebBridge {
     'chat:cleared',
     'chat:deleted',
     'chat:opened',
+    'chat:ask-question',
   ]);
 
   private handleSSEEvent(event: SSEEvent): void {
@@ -828,7 +835,12 @@ export class WebBridge {
         }
 
         case 'chat:ask-question':
-          this.dispatch('chat/askQuestion', data);
+          messageCache.invalidate(this.host, data.chatId);
+          if (this.loadingChatIds.has(data.chatId)) {
+            this.restoreQueue.push(event);
+          } else {
+            this.dispatch('chat/askQuestion', data);
+          }
           break;
 
         case 'jobs:updated':
@@ -968,6 +980,7 @@ export class WebBridge {
       if (!candidate?.id) continue;
       this.currentChatId = candidate.id;
       const result = await this.loadChatMessages(candidate.id);
+      if (this.disposed) return;
       if (result === true) {
         // Clear stale preferred if we had to fall back to a different chat.
         if (preferred && candidate.id !== preferred.id) {
@@ -1020,7 +1033,7 @@ export class WebBridge {
    * to the webview. Skips if the chat was already loaded.
    *
    * Performance: checks the in-memory message cache first to avoid a REST
-   * round-trip (e.g. on tab switch or reconnection). Falls back to REST
+   * round-trip within a connection. Falls back to REST
    * on cache miss, and populates the cache on success.
    *
    * Called automatically on initial connect (for the most recent chat)
@@ -1031,8 +1044,10 @@ export class WebBridge {
    *          `'error'` if loading failed due to a transient issue (timeout, network, 500).
    */
   async loadChatMessages(chatId: string): Promise<boolean | 'not_found' | 'error'> {
+    if (this.disposed) return 'error';
     if (this.loadedChatIds.has(chatId)) return true;
 
+    this.loadingChatIds.add(chatId);
     try {
       console.log(`[Bridge] Loading messages for chat ${chatId}`);
 
@@ -1045,6 +1060,7 @@ export class WebBridge {
       } else {
         // Cache miss — fetch from server with retries
         const result = await this.fetchChatWithRetry(chatId);
+        if (this.disposed) return 'error';
         if (result === WebBridge.CHAT_NOT_FOUND) return 'not_found';
         if (result === WebBridge.CHAT_FETCH_ERROR) return 'error';
         chat = result;
@@ -1081,11 +1097,20 @@ export class WebBridge {
       // would cause N separate Immer drafts and N React renders).
       this.dispatch('chat/batchContentReceived', events);
 
+      // The question reducer ignores unknown chats, so restore interactive
+      // state only after the content batch has created its destination.
+      for (const question of chatToPendingQuestions(chat)) {
+        this.dispatch('chat/askQuestion', question);
+      }
+
       console.log(`[Bridge] Restored ${chat?.messages?.length ?? 0} message(s) for chat ${chatId}`);
       return true;
     } catch (err) {
       console.error(`[Bridge] Failed to load messages for chat ${chatId}:`, err);
       return 'error';
+    } finally {
+      this.loadingChatIds.delete(chatId);
+      this.flushRestoreQueue();
     }
   }
 
@@ -1132,11 +1157,12 @@ export class WebBridge {
   }
 
   /**
-   * Replay SSE events that were queued while `restoring` was true.
-   * Called in the `finally` block of `dispatchInitialState()` and
-   * `syncAfterReconnect()` after `restoring` is set back to false.
+   * Replay SSE events that were queued while restoring or lazily loading a chat.
+   * Called in the `finally` blocks of `dispatchInitialState()`,
+   * `syncAfterReconnect()`, and `loadChatMessages()`.
    */
   private flushRestoreQueue(): void {
+    if (this.disposed || this.restoring) return;
     if (this.restoreQueue.length === 0) return;
 
     const queued = this.restoreQueue;

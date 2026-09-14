@@ -12,6 +12,7 @@
  */
 
 import type {
+  AskQuestionData as _AskQuestionData,
   ChatContext as _ChatContext,
   ChatContentReceivedParams as _ChatContentReceivedParams,
   MCPServerUpdatedParams as _MCPServerUpdatedParams,
@@ -20,6 +21,7 @@ import type {
 
 // Re-export webview types used across the bridge layer,
 // so consumers import from one place instead of reaching into @webview.
+export type AskQuestionData = _AskQuestionData;
 export type ChatContext = _ChatContext;
 export type ChatContentReceivedParams = _ChatContentReceivedParams;
 export type MCPServerUpdatedParams = _MCPServerUpdatedParams;
@@ -73,12 +75,21 @@ export interface ChatSummary {
   parentChatId?: string;
 }
 
+/** A tool call awaiting approval or an ask_user response in a chat snapshot. */
+export interface PendingToolCall {
+  id: string;
+  name: string;
+  requestId?: string;
+  arguments?: Record<string, unknown>;
+}
+
 /** GET /api/v1/chats/:id — full chat detail */
 export interface RemoteChat {
   id: string;
   title?: string;
   status?: 'idle' | 'running';
   messages?: StoredMessage[];
+  pendingToolCalls?: PendingToolCall[];
 }
 
 /** POST /api/v1/chats/:id/prompt — request body */
