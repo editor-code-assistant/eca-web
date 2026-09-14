@@ -12,6 +12,7 @@
 
 import type { ChatContentReceivedParams } from '@webview/protocol';
 import type {
+  AskQuestionData,
   RemoteChat,
   StoredMessage,
   StoredReasonContent,
@@ -90,6 +91,58 @@ export function chatToRestoreEvents(chat: RemoteChat): RestoreEvent[] {
   }
 
   return events;
+}
+
+/**
+ * Restore actionable ask_user calls from the current snapshot, not history.
+ * Dispatch these through chat/askQuestion after the chat's content is restored.
+ * Older servers and calls still awaiting approval may have no requestId.
+ */
+export function chatToPendingQuestions(chat: RemoteChat): AskQuestionData[] {
+  if (!chat?.id) return [];
+
+  return (chat.pendingToolCalls ?? []).flatMap((call) => {
+    if (call.name !== 'ask_user' || !call.requestId?.trim()) return [];
+    const args = call.arguments;
+    if (!args || typeof args.question !== 'string' || !args.question.trim()) return [];
+
+    // Match ask_user's normalization: options may be strings, objects, or
+    // a JSON-encoded array. Invalid options are ignored, not rendered as buttons.
+    let rawOptions = args.options;
+    if (typeof rawOptions === 'string') {
+      try {
+        rawOptions = JSON.parse(rawOptions);
+      } catch {
+        rawOptions = [];
+      }
+    }
+    const options: AskQuestionData['options'] = [];
+    if (Array.isArray(rawOptions)) {
+      for (const option of rawOptions) {
+        const value = typeof option === 'string' ? { label: option } : option;
+        if (!isRecord(value) || typeof value.label !== 'string' || !value.label.trim()) continue;
+        options.push({
+          label: value.label,
+          ...(typeof value.description === 'string' && value.description.trim()
+            ? { description: value.description }
+            : {}),
+        });
+      }
+    }
+
+    return [{
+      chatId: chat.id,
+      toolCallId: call.id,
+      requestId: call.requestId,
+      question: args.question,
+      options,
+      allowFreeform: args.allowFreeform === undefined ? true : Boolean(args.allowFreeform),
+    }];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 // ---------------------------------------------------------------------------
