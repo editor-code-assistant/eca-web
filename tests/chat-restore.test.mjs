@@ -260,6 +260,30 @@ test('the already-connected live question path still works', async () => {
   assert.equal(messageCache.has(host, 'chat-1'), false);
 });
 
+test('a matching tool completion clears a question answered by another client', async () => {
+  const bridge = bridgeFor(snapshot({ pendingToolCalls: [] }));
+  await bridge.dispatchInitialState();
+  bridge.handleSSEEvent(event('chat:ask-question', {
+    chatId: 'chat-1', toolCallId: 'tool-1', requestId: 'live', question: 'Live?', options: [],
+  }));
+  bridge.handleSSEEvent(event('chat:content-received', {
+    chatId: 'chat-1', role: 'system',
+    content: {
+      type: 'toolCalled', origin: 'native', id: 'other-tool', name: 'read_file',
+      arguments: [], error: false, outputs: [], totalTimeMs: 1,
+    },
+  }));
+  assert.equal(state.chats['chat-1'].pendingQuestion.requestId, 'live');
+  bridge.handleSSEEvent(event('chat:content-received', {
+    chatId: 'chat-1', role: 'system',
+    content: {
+      type: 'toolCalled', origin: 'native', id: 'tool-1', name: 'ask_user',
+      arguments: [], error: false, outputs: [], totalTimeMs: 1,
+    },
+  }));
+  assert.equal(state.chats['chat-1'].pendingQuestion, undefined);
+});
+
 test('a disconnected bridge does not publish a delayed snapshot into another session', async () => {
   const bridge = bridgeFor(snapshot());
   const response = deferred();
