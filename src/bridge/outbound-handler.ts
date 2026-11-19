@@ -27,6 +27,8 @@ export interface OutboundContext {
   dispatchInitialState: () => Promise<void>;
   /** Lazy-load messages for a chat (fetches from server if not yet loaded). */
   loadChatMessages: (chatId: string) => Promise<boolean | 'not_found' | 'error'>;
+  /** Tells the user an action failed (the shell shows it). */
+  reportError: (message: string) => void;
 }
 
 /**
@@ -69,6 +71,10 @@ export async function handleOutbound(
 
       case 'chat/promptSteer':
         await api.steerPrompt(data.chatId, data.message);
+        break;
+
+      case 'chat/promptSteerRemove':
+        await api.removeSteer(data.chatId);
         break;
 
       case 'chat/delete':
@@ -321,7 +327,23 @@ export async function handleOutbound(
     }
   } catch (err) {
     console.error(`[outbound] Error handling ${type}:`, err);
+    const message = actionErrorMessage(type, err);
+    if (message) ctx.reportError(message);
   }
+}
+
+/**
+ * What to tell the user when the server answered an action with an error,
+ * or null for failures without an answer (network, timeout): the reconnection
+ * banner already covers those.
+ */
+function actionErrorMessage(type: string, err: unknown): string | null {
+  const e = err as { status?: unknown; code?: unknown; message?: unknown } | null;
+  if (typeof e?.status !== 'number') return null;
+  if (e.code === 'method_not_found') {
+    return `This ECA doesn't offer ${type}: the ECA module serving it is disabled.`;
+  }
+  return `${type} failed: ${typeof e.message === 'string' ? e.message : `status ${e.status}`}`;
 }
 
 // ---------------------------------------------------------------------------

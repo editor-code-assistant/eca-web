@@ -90,6 +90,10 @@ export interface RemoteChat {
   status?: 'idle' | 'running';
   messages?: StoredMessage[];
   pendingToolCalls?: PendingToolCall[];
+  /** The chat's own selection: its pick, else the session default. */
+  model?: string;
+  agent?: string;
+  variant?: string | null;
 }
 
 /** POST /api/v1/chats/:id/prompt — request body */
@@ -114,12 +118,16 @@ export interface SendPromptResponse {
 
 export type StoredMessageRole =
   | 'user'
+  | 'system'
   | 'assistant'
   | 'tool_call'
   | 'tool_call_output'
   | 'reason'
   | 'server_tool_use'
-  | 'server_tool_result';
+  | 'server_tool_result'
+  | 'image_generation_call'
+  | 'compact_marker'
+  | 'flag';
 
 export interface StoredMessage {
   role: StoredMessageRole;
@@ -130,6 +138,8 @@ export interface StoredMessage {
 export interface StoredTextContent {
   type: 'text';
   text: string;
+  /** Set on context a module added for the model only: never shown. */
+  module?: string;
 }
 
 export interface StoredToolCallContent {
@@ -147,9 +157,14 @@ export interface StoredToolCallOutputContent {
   id: string;
   name?: string;
   fullName?: string;
+  arguments?: string | Record<string, unknown>;
+  origin?: string;
+  error?: boolean;
+  /** Set when the call didn't run, e.g. `user-choice-deny`: the decision's code. */
+  rejectionReason?: string;
   output?: {
     error?: boolean;
-    contents?: Array<{ type: string; text: string }>;
+    contents?: Array<{ type: string; text?: string; module?: string }>;
   };
   totalTimeMs?: number;
   details?: unknown;
@@ -161,6 +176,25 @@ export interface StoredReasonContent {
   id: string;
   text?: string;
   totalTimeMs?: number;
+}
+
+export interface StoredFlagContent {
+  text: string;
+}
+
+export interface StoredCompactMarkerContent {
+  /** A module's checkpoint label. */
+  label?: string;
+  'auto?'?: boolean;
+}
+
+export interface StoredServerToolUseContent {
+  id: string;
+  name?: string;
+}
+
+export interface StoredServerToolResultContent {
+  toolUseId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +287,7 @@ export type OutboundMessage =
   | { type: 'chat/toolCallReject'; data: { chatId: string; toolCallId: string } }
   | { type: 'chat/promptStop'; data: { chatId: string } }
   | { type: 'chat/promptSteer'; data: { chatId: string; message: string } }
+  | { type: 'chat/promptSteerRemove'; data: { chatId: string } }
   | { type: 'chat/delete'; data: { chatId: string } }
   | { type: 'chat/rollback'; data: { chatId: string; contentId: string } }
   | { type: 'chat/clearChat'; data: { chatId: string } }
@@ -312,6 +347,9 @@ export type ChatListChangeCallback = (chats: ChatEntry[], selectedChatId: string
 
 /** Callback signature for trust state change notifications. */
 export type TrustChangeCallback = (trust: boolean) => void;
+
+/** Callback signature for a user action the server answered with an error. */
+export type ActionErrorCallback = (message: string) => void;
 
 // ---------------------------------------------------------------------------
 // Reconnection types

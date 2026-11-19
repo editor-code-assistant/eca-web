@@ -2,20 +2,26 @@
  * Chat restore — converts stored server messages to webview events.
  *
  * The ECA server stores messages in LLM conversation format
- * (user/assistant/tool_call/tool_call_output/reason).
+ * (user/assistant/tool_call/tool_call_output/reason/flag/...).
  *
  * The webview expects fine-grained contentReceived events
  * (text, toolCallPrepare, toolCalled, reasonStarted, etc.).
  *
- * This module bridges the two formats during chat restoration.
+ * This module bridges the two formats during chat restoration, following
+ * what ECA itself sends editors when they reopen a chat (`chat/open`, see
+ * ECA's `eca.features.chat.replay`), so a restored chat looks as it did live.
  */
 
 import type { ChatContentReceivedParams } from '@webview/protocol';
 import type {
   AskQuestionData,
   RemoteChat,
+  StoredCompactMarkerContent,
+  StoredFlagContent,
   StoredMessage,
   StoredReasonContent,
+  StoredServerToolResultContent,
+  StoredServerToolUseContent,
   StoredTextContent,
   StoredToolCallContent,
   StoredToolCallOutputContent,
@@ -27,15 +33,16 @@ export type RestoreEvent = ChatContentReceivedParams;
 /**
  * Convert a single stored message into one or more webview events.
  *
- * Returns an empty array for unknown/internal roles (server_tool_use, etc.)
- * so the caller can safely iterate without null checks.
+ * Returns an empty array for roles with no webview representation
+ * (e.g. generated images: the webview has no image content), so the
+ * caller can safely iterate without null checks.
  */
 export function storedMessageToEvents(chatId: string, msg: StoredMessage): RestoreEvent[] {
   switch (msg.role) {
     case 'user':
-      return convertUserMessage(chatId, msg);
+    case 'system':
     case 'assistant':
-      return convertAssistantMessage(chatId, msg);
+      return convertTextMessage(chatId, msg.role, msg);
     case 'tool_call':
       return convertToolCall(chatId, msg);
     case 'tool_call_output':
@@ -43,8 +50,14 @@ export function storedMessageToEvents(chatId: string, msg: StoredMessage): Resto
     case 'reason':
       return convertReason(chatId, msg);
     case 'server_tool_use':
+      return convertServerToolUse(chatId, msg);
     case 'server_tool_result':
-      // Internal LLM format — no webview representation
+      return convertServerToolResult(chatId, msg);
+    case 'compact_marker':
+      return convertCompactMarker(chatId, msg);
+    case 'flag':
+      return convertFlag(chatId, msg);
+    case 'image_generation_call':
       return [];
     default:
       console.log(`[chat-restore] Unknown message role: ${msg.role}`);
@@ -56,7 +69,8 @@ export function storedMessageToEvents(chatId: string, msg: StoredMessage): Resto
  * Restore a full chat into a sequence of dispatch-ready events.
  *
  * This includes:
- * 1. All stored messages → contentReceived events
+ * 1. All stored messages → contentReceived events (consecutive reasons
+ *    merged into one reasoning block, as ECA groups them live)
  * 2. Chat title → metadata event
  * 3. Running status → progress event (if still running)
  */
@@ -67,7 +81,7 @@ export function chatToRestoreEvents(chat: RemoteChat): RestoreEvent[] {
 
   // Replay stored messages
   if (chat.messages?.length) {
-    for (const msg of chat.messages) {
+    for (const msg of mergeAdjacentReasons(chat.messages)) {
       events.push(...storedMessageToEvents(chat.id, msg));
     }
   }
@@ -149,42 +163,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // Converters (one per stored message role)
 // ---------------------------------------------------------------------------
 
-function convertUserMessage(chatId: string, msg: StoredMessage): RestoreEvent[] {
-  const contents = normalizeContentArray(msg.content);
-  const events: RestoreEvent[] = [];
-
-  for (const item of contents) {
-    const textItem = item as StoredTextContent;
-    if (textItem.type === 'text') {
-      events.push({
-        chatId,
-        role: 'user',
-        content: {
-          type: 'text',
-          text: textItem.text,
-          ...(msg.contentId ? { contentId: msg.contentId } : {}),
-        },
-      });
-    }
-  }
-  return events;
-}
-
-function convertAssistantMessage(chatId: string, msg: StoredMessage): RestoreEvent[] {
-  const contents = normalizeContentArray(msg.content);
-  const events: RestoreEvent[] = [];
-
-  for (const item of contents) {
-    const textItem = item as StoredTextContent;
-    if (textItem.type === 'text') {
-      events.push({
-        chatId,
-        role: 'assistant',
-        content: { type: 'text', text: textItem.text },
-      });
-    }
-  }
-  return events;
+/**
+ * A user, system or assistant message: its texts in one event, without the
+ * context modules added for the model only (never shown, live or restored).
+ */
+function convertTextMessage(
+  chatId: string,
+  role: 'user' | 'system' | 'assistant',
+  msg: StoredMessage,
+): RestoreEvent[] {
+  const texts = normalizeContentArray(msg.content)
+    .filter((item): item is StoredTextContent => isTextItem(item) && !isModuleContext(item))
+    .map((item) => item.text);
+  if (texts.length === 0) return [];
+  return [{
+    chatId,
+    role,
+    content: {
+      type: 'text',
+      text: texts.join('\n'),
+      ...(msg.contentId ? { contentId: msg.contentId } : {}),
+    },
+  }];
 }
 
 function convertToolCall(chatId: string, msg: StoredMessage): RestoreEvent[] {
@@ -208,17 +208,51 @@ function convertToolCall(chatId: string, msg: StoredMessage): RestoreEvent[] {
   }];
 }
 
+/**
+ * A call that ran restores as called; one that didn't (`rejectionReason`,
+ * e.g. the user rejected it) as run then rejected, with that reason.
+ */
 function convertToolCallOutput(chatId: string, msg: StoredMessage): RestoreEvent[] {
   const tco = msg.content as StoredToolCallOutputContent;
+  const name = tco.name || tco.fullName || 'unknown';
+
+  if (tco.rejectionReason) {
+    const call = {
+      id: tco.id,
+      name,
+      server: tco.server,
+      origin: (tco.origin as 'native' | 'mcp') || 'native',
+      arguments: tco.arguments ?? {},
+      summary: tco.summary,
+      details: tco.details,
+    };
+    // Casts: the webview's types list `arguments` and have no `reason`,
+    // though ECA sends an argument map and the reason (as live).
+    return [
+      {
+        chatId,
+        role: 'assistant',
+        content: { type: 'toolCallRun', ...call, manualApproval: false } as any,
+      },
+      {
+        chatId,
+        role: 'assistant',
+        content: { type: 'toolCallRejected', ...call, reason: camelCase(tco.rejectionReason) } as any,
+      },
+    ];
+  }
+
   return [{
     chatId,
     role: 'assistant',
     content: {
       type: 'toolCalled',
       id: tco.id,
-      name: tco.name || tco.fullName || 'unknown',
-      error: tco.output?.error || false,
-      outputs: tco.output?.contents || [],
+      name,
+      error: tco.error ?? tco.output?.error ?? false,
+      // Text outputs only: no module context (for the model only), and no
+      // images, which the webview has no content for.
+      outputs: (tco.output?.contents || []).filter((c) => !isModuleContext(c) && c?.type !== 'image'),
       totalTimeMs: tco.totalTimeMs,
       details: tco.details,
       summary: tco.summary,
@@ -254,9 +288,107 @@ function convertReason(chatId: string, msg: StoredMessage): RestoreEvent[] {
   return events;
 }
 
+/**
+ * A tool the LLM provider ran itself, e.g. its web search. Cast: the
+ * webview's `ToolCallOrigin` type lacks the `'server'` origin ECA sends.
+ */
+function convertServerToolUse(chatId: string, msg: StoredMessage): RestoreEvent[] {
+  const s = msg.content as StoredServerToolUseContent;
+  return [{
+    chatId,
+    role: 'assistant',
+    content: {
+      type: 'toolCallPrepare',
+      id: s.id,
+      name: s.name || 'web_search',
+      argumentsText: '',
+      origin: 'server',
+      server: 'llm',
+      manualApproval: false,
+    } as any,
+  }];
+}
+
+function convertServerToolResult(chatId: string, msg: StoredMessage): RestoreEvent[] {
+  const { toolUseId: id } = msg.content as StoredServerToolResultContent;
+  const call = { id, name: 'web_search', origin: 'server', server: 'llm', arguments: {} };
+  return [
+    { chatId, role: 'assistant', content: { type: 'toolCallRun', ...call, manualApproval: false } as any },
+    { chatId, role: 'assistant', content: { type: 'toolCallRunning', ...call } as any },
+    { chatId, role: 'assistant', content: { type: 'toolCalled', ...call, error: false, outputs: [] } as any },
+  ];
+}
+
+function convertCompactMarker(chatId: string, msg: StoredMessage): RestoreEvent[] {
+  const m = (msg.content ?? {}) as StoredCompactMarkerContent;
+  const label = typeof m.label === 'string' ? m.label.trim() : '';
+  const text = label
+    ? `── ${label} ──`
+    : m['auto?'] ? '── Chat auto-compacted ──' : '── Chat compacted ──';
+  return [{ chatId, role: 'system', content: { type: 'text', text } }];
+}
+
+function convertFlag(chatId: string, msg: StoredMessage): RestoreEvent[] {
+  const f = msg.content as StoredFlagContent;
+  if (!msg.contentId) return [];
+  return [{ chatId, role: 'system', content: { type: 'flag', text: f?.text ?? '', contentId: msg.contentId } }];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Collapses each run of consecutive reason messages into one, keeping the
+ * first id, joining the non-blank texts with a blank line and summing the
+ * times, as ECA groups reasoning live.
+ */
+function mergeAdjacentReasons(messages: StoredMessage[]): StoredMessage[] {
+  const merged: StoredMessage[] = [];
+  let run: StoredMessage[] = [];
+  const flush = () => {
+    if (run.length === 1) {
+      merged.push(run[0]);
+    } else if (run.length > 1) {
+      const contents = run.map((m) => m.content as StoredReasonContent);
+      const texts = contents.map((c) => c.text).filter((t): t is string => typeof t === 'string' && t.trim() !== '');
+      const times = contents.map((c) => c.totalTimeMs).filter((t): t is number => typeof t === 'number');
+      merged.push({
+        ...run[0],
+        content: {
+          id: contents[0].id,
+          text: texts.length ? texts.join('\n\n') : undefined,
+          totalTimeMs: times.length ? times.reduce((a, b) => a + b, 0) : undefined,
+        },
+      });
+    }
+    run = [];
+  };
+  for (const msg of messages) {
+    if (msg.role === 'reason') {
+      run.push(msg);
+    } else {
+      flush();
+      merged.push(msg);
+    }
+  }
+  flush();
+  return merged;
+}
+
+function isTextItem(item: unknown): item is StoredTextContent {
+  return isRecord(item) && item.type === 'text' && typeof item.text === 'string';
+}
+
+/** Context a module added for the model only (a text with its module id). */
+function isModuleContext(item: unknown): boolean {
+  return isRecord(item) && item.module != null && item.type === 'text';
+}
+
+/** `user-choice-deny` → `userChoiceDeny`, as the protocol names reasons. */
+function camelCase(value: string): string {
+  return value.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+}
 
 /** Normalize content to always be an array (some roles store a single object). */
 function normalizeContentArray(content: unknown): unknown[] {

@@ -40,6 +40,8 @@ beforeEach(() => {
     'chat/contentReceived': 'addContentReceived',
     'chat/askQuestion': 'setPendingQuestion',
     'chat/cleared': 'cleared',
+    'chat/opened': 'chatOpened',
+    'chat/selectChat': 'selectChat',
   };
   globalThis.window = {
     // Apply the real reducers synchronously; this is not a browser event loop.
@@ -294,4 +296,146 @@ test('a disconnected bridge does not publish a delayed snapshot into another ses
   response.resolve(snapshot());
   await loading;
   assert.equal(messages.length, count);
+});
+
+const idle = (overrides = {}) => snapshot({ status: 'idle', pendingToolCalls: [], title: undefined, ...overrides });
+const contents = (chat) => restore.chatToRestoreEvents(chat).map(e => e.content);
+
+test('a rejected call restores rejected, with its summary and reason', async () => {
+  const call = {
+    id: 'tc-1', name: 'shell_command', fullName: 'eca__shell_command', server: 'eca', origin: 'native',
+    arguments: { command: 'echo hi' }, summary: '$ echo hi',
+  };
+  const chat = idle({ messages: [
+    { role: 'tool_call', content: call },
+    { role: 'tool_call_output', content: {
+      ...call, rejectionReason: 'user-choice-deny',
+      output: { error: true, contents: [{ type: 'text', text: 'This tool call did NOT run' }] },
+    } },
+  ] });
+  const events = contents(chat);
+  assert.deepEqual(events.map(c => c.type), ['toolCallPrepare', 'toolCallRun', 'toolCallRejected']);
+  assert.equal(events[2].reason, 'userChoiceDeny');
+  await bridgeFor(chat).dispatchInitialState();
+  const tool = state.chats['chat-1'].messages.find(m => m.type === 'toolCall');
+  assert.equal(tool.status, 'rejected');
+  assert.equal(tool.summary, '$ echo hi');
+});
+
+test('context a module added for the model is not shown, as live', () => {
+  const [user, , called] = contents(idle({ messages: [
+    { role: 'user', contentId: 'u1', content: [
+      { type: 'text', text: 'hi' }, { type: 'text', text: 'notes', module: 'acme/memory' }] },
+    { role: 'tool_call', content: { id: 'tc', name: 'read_file', arguments: {} } },
+    { role: 'tool_call_output', content: { id: 'tc', name: 'read_file', error: false, output: { error: false, contents: [
+      { type: 'text', text: 'file' }, { type: 'text', text: 'hook context', module: 'eca/hooks' }] } } },
+  ] }));
+  assert.deepEqual(user, { type: 'text', text: 'hi', contentId: 'u1' });
+  assert.deepEqual(called.outputs, [{ type: 'text', text: 'file' }]);
+});
+
+test('flags, compaction markers and system texts restore as ECA replays them', () => {
+  const events = restore.chatToRestoreEvents(idle({ messages: [
+    { role: 'flag', contentId: 'f1', content: { text: 'checkpoint' } },
+    { role: 'compact_marker', content: { 'auto?': true } },
+    { role: 'compact_marker', content: { label: 'Memory saved' } },
+    { role: 'compact_marker', content: {} },
+    { role: 'system', content: [{ type: 'text', text: 'Note' }] },
+  ] })).map(e => [e.role, e.content]);
+  assert.deepEqual(events, [
+    ['system', { type: 'flag', text: 'checkpoint', contentId: 'f1' }],
+    ['system', { type: 'text', text: '── Chat auto-compacted ──' }],
+    ['system', { type: 'text', text: '── Memory saved ──' }],
+    ['system', { type: 'text', text: '── Chat compacted ──' }],
+    ['system', { type: 'text', text: 'Note' }],
+  ]);
+});
+
+test('consecutive reasons restore as one reasoning block', () => {
+  const reason = (id, text, totalTimeMs) => ({ role: 'reason', content: { id, text, totalTimeMs } });
+  assert.deepEqual(contents(idle({ messages: [
+    reason('r1', null, 1000), reason('r2', 'Plan', 500), reason('r3', ' ', 0), reason('r4', 'Act', 250),
+    { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+  ] })), [
+    { type: 'reasonStarted', id: 'r1' },
+    { type: 'reasonText', id: 'r1', text: 'Plan\n\nAct' },
+    { type: 'reasonFinished', id: 'r1', totalTimeMs: 1750 },
+    { type: 'text', text: 'Hi' },
+  ]);
+});
+
+test('a search the provider ran restores as a web_search call', async () => {
+  await bridgeFor(idle({ messages: [
+    { role: 'server_tool_use', content: { id: 's1', name: 'web_search' } },
+    { role: 'server_tool_result', content: { toolUseId: 's1' } },
+  ] })).dispatchInitialState();
+  const tool = state.chats['chat-1'].messages.find(m => m.type === 'toolCall');
+  assert.equal(tool.name, 'web_search');
+  assert.equal(tool.status, 'succeeded');
+});
+
+test('a restored chat shows its own model, agent and variant', async () => {
+  await bridgeFor(idle({ model: 'mock/m2', agent: 'plan', variant: 'high' })).dispatchInitialState();
+  const update = messages.find(m => m.type === 'config/updated' && m.data.chatId === 'chat-1');
+  assert.deepEqual(update.data.chat, { selectModel: 'mock/m2', selectAgent: 'plan', selectVariant: 'high' });
+  assert.ok(messages.findIndex(m => m.type === 'chat/batchContentReceived') < messages.indexOf(update),
+    'after the chat exists: the reducer ignores unknown chats');
+  state = chatSlice.reducer(state, chatSlice.actions.applyConfigToChat(update.data));
+  assert.equal(state.chats['chat-1'].selectedModel, 'mock/m2');
+  assert.equal(state.chats['chat-1'].selectedAgent, 'plan');
+  assert.equal(state.chats['chat-1'].selectedVariant, 'high');
+});
+
+test('selecting a chat the webview already has from live events shows it', async () => {
+  const bridge = bridgeFor(idle());
+  await bridge.dispatchInitialState();
+  // A fork, or another client's chat, reaches the webview as live events first.
+  bridge.handleSSEEvent(event('chat:opened', { chatId: 'chat-2', title: 'Synthetic chat (2)' }));
+  assert.equal(state.selectedChat, 'chat-1');
+  bridge.api.getChat = async () => idle({
+    id: 'chat-2', messages: [{ role: 'user', content: [{ type: 'text', text: 'Forked' }] }],
+  });
+  await bridge.selectChat('chat-2');
+  assert.equal(state.selectedChat, 'chat-2');
+  assert.equal(state.chats['chat-2'].messages.find(m => m.type === 'text').value, 'Forked');
+});
+
+test('a chat that loads after the user picked another one does not take the selection', async () => {
+  const bridge = bridgeFor(idle());
+  await bridge.dispatchInitialState();
+  bridge.handleSSEEvent(event('chat:opened', { chatId: 'chat-2', title: 'Synthetic chat (2)' }));
+  const response = deferred();
+  bridge.api.getChat = () => response.promise;
+  const slow = bridge.selectChat('chat-2');
+  await bridge.selectChat('chat-1');
+  response.resolve(idle({ id: 'chat-2' }));
+  await slow;
+  assert.equal(state.selectedChat, 'chat-1');
+  assert.equal(bridge.getSelectedChatId(), 'chat-1');
+});
+
+test('removing a steer message reaches the server', () => {
+  const bridge = bridgeFor(idle());
+  let removed;
+  bridge.api.removeSteer = async (chatId) => { removed = chatId; };
+  bridge.routeOutbound({ type: 'chat/promptSteerRemove', data: { chatId: 'chat-1' } });
+  assert.equal(removed, 'chat-1');
+});
+
+test('an action the server answers with an error tells the user why', async () => {
+  const bridge = bridgeFor(idle());
+  const reported = [];
+  bridge.onActionErrored((message) => reported.push(message));
+  const refused = (message, status, code) => async () => { throw Object.assign(new Error(message), { status, code }); };
+  bridge.api.mcpStartServer = refused('Method mcp/startServer not found', 404, 'method_not_found');
+  bridge.api.deleteChat = refused('Chat chat-9 does not exist', 404, 'chat_not_found');
+  bridge.api.mcpStopServer = async () => { throw new Error('Failed to fetch'); };
+  bridge.routeOutbound({ type: 'mcp/startServer', data: { name: 'github' } });
+  bridge.routeOutbound({ type: 'chat/delete', data: { chatId: 'chat-9' } });
+  bridge.routeOutbound({ type: 'mcp/stopServer', data: { name: 'github' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reported, [
+    "This ECA doesn't offer mcp/startServer: the ECA module serving it is disabled.",
+    'chat/delete failed: Chat chat-9 does not exist',
+  ], 'no answer from the server (network) is the reconnection banner\'s job');
 });

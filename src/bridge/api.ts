@@ -81,8 +81,10 @@ export class EcaRemoteApi {
       const message = errBody?.error?.message || `${method} ${path} failed: ${res.status}`;
       const error = new Error(message);
       // Attach the HTTP status code so callers can distinguish 404 from
-      // transient errors (500, timeout) without fragile string matching.
+      // transient errors (500, timeout) without fragile string matching,
+      // and the server's error code (e.g. `method_not_found`).
       (error as any).status = res.status;
+      (error as any).code = errBody?.error?.code;
       throw error;
     }
 
@@ -138,6 +140,11 @@ export class EcaRemoteApi {
       method: 'POST',
       body: { message },
     });
+  }
+
+  /** Drop the steer message the running prompt hasn't taken yet. */
+  async removeSteer(chatId: string): Promise<void> {
+    return this.request(`/chats/${chatId}/steer`, { method: 'DELETE' });
   }
 
   /** Approve a pending tool call. Ignores 409 (already handled). */

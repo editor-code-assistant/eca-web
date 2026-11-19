@@ -53,6 +53,9 @@ class SessionErrorBoundary extends Component<
 
 export type SessionStatus = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
+/** How long a failed action's message stays, unless dismissed first. */
+const ACTION_ERROR_VISIBLE_MS = 8_000;
+
 interface RemoteSessionProps {
   host: string;
   password: string;
@@ -74,6 +77,15 @@ export function RemoteSession({ host, password, protocol, lastChatId, onStatusCh
   /** Reconnection overlay state — shown on top of the mounted webview. */
   const [reconnection, setReconnection] = useState<ReconnectionState | null>(null);
 
+  /** The last user action the server answered with an error, shown until dismissed. */
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!actionError) return;
+    const timer = setTimeout(() => setActionError(null), ACTION_ERROR_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [actionError]);
+
   const bridgeRef = useRef<WebBridge | null>(null);
   const mountedRef = useRef(true);
   const lastChatIdRef = useRef(lastChatId);
@@ -93,6 +105,10 @@ export function RemoteSession({ host, password, protocol, lastChatId, onStatusCh
 
     const bridge = new WebBridge(host, password, protocol, lastChatIdRef.current);
     bridgeRef.current = bridge;
+
+    bridge.onActionErrored((message) => {
+      if (mountedRef.current) setActionError(message);
+    });
 
     // Subscribe to reconnection events
     bridge.onReconnection((rs) => {
@@ -157,6 +173,9 @@ export function RemoteSession({ host, password, protocol, lastChatId, onStatusCh
         <div className="remote-session">
           {reconnection && (
             <ReconnectionBanner state={reconnection} />
+          )}
+          {actionError && !reconnection && (
+            <ActionErrorBanner message={actionError} onDismiss={() => setActionError(null)} />
           )}
           <WebviewApp />
         </div>
@@ -231,6 +250,19 @@ function ReconnectionBanner({ state }: { state: ReconnectionState }) {
 
   // --- Reconnecting ---
   return <ReconnectingBannerBody state={state} />;
+}
+
+/** A user action the server answered with an error, in the failed banner's style. */
+function ActionErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div className="reconnect-banner reconnect-banner--failed" role="alert">
+      <i className="codicon codicon-warning reconnect-banner__icon--failed" />
+      <span className="reconnect-banner__text">{message}</span>
+      <button className="reconnect-banner__btn" onClick={onDismiss}>
+        Dismiss
+      </button>
+    </div>
+  );
 }
 
 /**

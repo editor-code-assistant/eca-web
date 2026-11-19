@@ -24,6 +24,7 @@ import { handleOutbound, type OutboundContext } from './outbound-handler';
 import { SSEClient, type SSEEvent } from './sse';
 import type { Protocol } from './utils';
 import type {
+  ActionErrorCallback,
   ChatEntry,
   ChatListChangeCallback,
   ChatSummary,
@@ -79,6 +80,9 @@ export class WebBridge {
 
   /** Callback invoked whenever trust mode changes. */
   private onTrustChange: TrustChangeCallback | null = null;
+
+  /** Callback invoked when the server answers a user action with an error. */
+  private onActionError: ActionErrorCallback | null = null;
 
   /**
    * IDs of chats whose full message history has been fetched from the REST API
@@ -508,19 +512,20 @@ export class WebBridge {
       // Chat already exists in webview Redux — just switch to it.
       this.dispatch('chat/selectChat', chatId);
     } else {
-      // Fetch and dispatch content events. The first contentReceived event
-      // auto-creates the chat in Redux and sets it as selectedChat, so we
-      // don't need a separate selectChat dispatch (which would race).
+      // Fetch and dispatch content events.
       const result = await this.loadChatMessages(chatId);
 
       if (result === 'not_found') {
         // Chat was deleted on the server — remove stale sidebar entry.
         this.removeChatEntry(chatId);
         this.currentChatId = null;
-      } else if (!this.loadedChatIds.has(chatId)) {
-        // Transient failure — still switch to the chat so the sidebar
-        // selection stays consistent. The webview will show the chat
-        // even if empty, and a future retry can populate it.
+      } else if (this.currentChatId === chatId) {
+        // Switch to the chat, unless the user picked another one meanwhile.
+        // The restored content selects only a chat new to the webview, not
+        // one it already has from live events (a fork, another client's
+        // chat). After a transient failure, this keeps the sidebar
+        // selection consistent: the webview shows the chat even if empty,
+        // and a future retry can populate it.
         this.dispatch('chat/selectChat', chatId);
       }
     }
@@ -599,6 +604,15 @@ export class WebBridge {
     this.onTrustChange = cb;
     // Immediately fire with current state
     cb(this.sessionState?.trust ?? false);
+  }
+
+  /**
+   * Register a listener for user actions the server answered with an error
+   * (e.g. an MCP action while ECA's MCP module is disabled), so the shell
+   * can tell the user instead of the action silently doing nothing.
+   */
+  onActionErrored(cb: ActionErrorCallback): void {
+    this.onActionError = cb;
   }
 
   /** Get the current trust mode. */
@@ -1097,6 +1111,18 @@ export class WebBridge {
       // would cause N separate Immer drafts and N React renders).
       this.dispatch('chat/batchContentReceived', events);
 
+      // The chat's own model, agent and variant, scoped to it, as ECA sends
+      // editors when they reopen a chat: otherwise it shows the session
+      // defaults. Only after the batch: the reducer ignores unknown chats.
+      const selection = {
+        ...(chat.model ? { selectModel: chat.model } : {}),
+        ...(chat.agent ? { selectAgent: chat.agent } : {}),
+        ...(chat.variant !== undefined ? { selectVariant: chat.variant } : {}),
+      };
+      if (Object.keys(selection).length > 0) {
+        this.dispatch('config/updated', { chatId, chat: selection });
+      }
+
       // The question reducer ignores unknown chats, so restore interactive
       // state only after the content batch has created its destination.
       for (const question of chatToPendingQuestions(chat)) {
@@ -1224,6 +1250,7 @@ export class WebBridge {
       setCurrentChatId: (id) => { this.currentChatId = id; },
       dispatchInitialState: () => this.dispatchInitialState(),
       loadChatMessages: (chatId) => this.loadChatMessages(chatId),
+      reportError: (message) => this.onActionError?.(message),
     };
     handleOutbound(msg, ctx);
   }
