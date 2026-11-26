@@ -364,6 +364,71 @@ test('consecutive reasons restore as one reasoning block', () => {
   ]);
 });
 
+const turnUsage = { model: 'mock/m1', totalTimeMs: 9800, outputTokens: 412, inputTokens: 45200, cost: '0.03' };
+
+test('what a turn used restores after the message ending it, as ECA replays it', () => {
+  const call = { id: 'tc', name: 'read_file', arguments: {} };
+  const events = restore.chatToRestoreEvents(idle({ messages: [
+    { role: 'user', contentId: 'u1', content: [{ type: 'text', text: 'hi' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Hello' }], turnUsage },
+    { role: 'user', contentId: 'u2', content: [{ type: 'text', text: 'read it' }] },
+    { role: 'tool_call', content: call },
+    // A turn stopped after a tool call: its record is on the call's output.
+    { role: 'tool_call_output', content: { ...call, error: false, output: { error: false, contents: [] } },
+      turnUsage: { outputTokens: 7, inputTokens: 900 } },
+    // A message showing nothing still gets its record, as in ECA's replay.
+    { role: 'image_generation_call', content: {}, turnUsage: { outputTokens: 1, inputTokens: 2 } },
+    { role: 'user', contentId: 'u3', content: [{ type: 'text', text: 'and?' }] },
+    // From before ECA kept what turns used: none.
+    { role: 'assistant', content: [{ type: 'text', text: 'Older' }] },
+  ] }));
+  assert.deepEqual(events.map(e => [e.role, e.content.type]), [
+    ['user', 'text'], ['assistant', 'text'], ['system', 'turnUsage'],
+    ['user', 'text'], ['assistant', 'toolCallPrepare'], ['assistant', 'toolCalled'], ['system', 'turnUsage'],
+    ['system', 'turnUsage'],
+    ['user', 'text'], ['assistant', 'text'],
+  ]);
+  assert.deepEqual(events[2], { chatId: 'chat-1', role: 'system', content: { type: 'turnUsage', ...turnUsage } });
+  assert.deepEqual(events[6].content, { type: 'turnUsage', outputTokens: 7, inputTokens: 900 });
+});
+
+test('reasons merged into one keep the record of the turn one of them ends', () => {
+  const reason = (id, text, extra = {}) => ({ role: 'reason', content: { id, text, totalTimeMs: 100 }, ...extra });
+  // A turn stopped while the model was thinking.
+  assert.deepEqual(contents(idle({ messages: [reason('r1', 'Plan'), reason('r2', 'Act', { turnUsage })] })), [
+    { type: 'reasonStarted', id: 'r1' },
+    { type: 'reasonText', id: 'r1', text: 'Plan\n\nAct' },
+    { type: 'reasonFinished', id: 'r1', totalTimeMs: 200 },
+    { type: 'turnUsage', ...turnUsage },
+  ]);
+});
+
+test('a reopened chat shows what its turns used under their answers, not in its subagents', async () => {
+  const spawn = {
+    id: 'sa', name: 'spawn_agent', server: 'eca', arguments: {},
+    details: { type: 'subagent', subagentChatId: 'sub-1' },
+  };
+  const bridge = bridgeFor(idle({ messages: [
+    { role: 'user', contentId: 'u1', content: [{ type: 'text', text: 'explore' }] },
+    { role: 'tool_call', content: spawn },
+    { role: 'tool_call_output', content: { ...spawn, error: false, output: { error: false, contents: [] } } },
+    { role: 'assistant', content: [{ type: 'text', text: 'Explored' }], turnUsage },
+  ] }));
+  await bridge.dispatchInitialState();
+  const shown = () => state.chats['chat-1'].messages.map(m => m.type);
+  assert.deepEqual(shown(), ['text', 'toolCall', 'text', 'turnUsage']);
+  assert.deepEqual(state.chats['chat-1'].messages[3], { type: 'turnUsage', ...turnUsage });
+  const live = (data) => bridge.handleSSEEvent(event('chat:content-received', data));
+  // A subagent's turn ends: nothing for it, in its call or in the chat.
+  live({ chatId: 'sub-1', parentChatId: 'chat-1', role: 'system', content: { type: 'turnUsage', ...turnUsage } });
+  assert.deepEqual(shown(), ['text', 'toolCall', 'text', 'turnUsage']);
+  assert.deepEqual(state.chats['chat-1'].messages[1].subagentMessages, []);
+  // The chat's own next turn ends live.
+  live({ chatId: 'chat-1', role: 'system', content: { type: 'turnUsage', ...turnUsage, outputTokens: 1 } });
+  assert.deepEqual(shown(), ['text', 'toolCall', 'text', 'turnUsage', 'turnUsage']);
+  assert.equal(state.chats['chat-1'].messages[4].outputTokens, 1);
+});
+
 test('a search the provider ran restores as a web_search call', async () => {
   await bridgeFor(idle({ messages: [
     { role: 'server_tool_use', content: { id: 's1', name: 'web_search' } },

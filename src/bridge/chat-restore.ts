@@ -70,7 +70,8 @@ export function storedMessageToEvents(chatId: string, msg: StoredMessage): Resto
  *
  * This includes:
  * 1. All stored messages → contentReceived events (consecutive reasons
- *    merged into one reasoning block, as ECA groups them live)
+ *    merged into one reasoning block, as ECA groups them live), each
+ *    message ending a turn followed by what the turn used (`turnUsage`)
  * 2. Chat title → metadata event
  * 3. Running status → progress event (if still running)
  */
@@ -83,6 +84,10 @@ export function chatToRestoreEvents(chat: RemoteChat): RestoreEvent[] {
   if (chat.messages?.length) {
     for (const msg of mergeAdjacentReasons(chat.messages)) {
       events.push(...storedMessageToEvents(chat.id, msg));
+      // After the message, even one showing nothing, as ECA replays it.
+      if (msg.turnUsage) {
+        events.push({ chatId: chat.id, role: 'system', content: { ...msg.turnUsage, type: 'turnUsage' } });
+      }
     }
   }
 
@@ -341,7 +346,8 @@ function convertFlag(chatId: string, msg: StoredMessage): RestoreEvent[] {
 /**
  * Collapses each run of consecutive reason messages into one, keeping the
  * first id, joining the non-blank texts with a blank line and summing the
- * times, as ECA groups reasoning live.
+ * times, as ECA groups reasoning live. The record of the turn a message of
+ * the run ends goes with the merged one, as in ECA's replay.
  */
 function mergeAdjacentReasons(messages: StoredMessage[]): StoredMessage[] {
   const merged: StoredMessage[] = [];
@@ -353,6 +359,7 @@ function mergeAdjacentReasons(messages: StoredMessage[]): StoredMessage[] {
       const contents = run.map((m) => m.content as StoredReasonContent);
       const texts = contents.map((c) => c.text).filter((t): t is string => typeof t === 'string' && t.trim() !== '');
       const times = contents.map((c) => c.totalTimeMs).filter((t): t is number => typeof t === 'number');
+      const turnUsage = run.find((m) => m.turnUsage)?.turnUsage;
       merged.push({
         ...run[0],
         content: {
@@ -360,6 +367,7 @@ function mergeAdjacentReasons(messages: StoredMessage[]): StoredMessage[] {
           text: texts.length ? texts.join('\n\n') : undefined,
           totalTimeMs: times.length ? times.reduce((a, b) => a + b, 0) : undefined,
         },
+        ...(turnUsage ? { turnUsage } : {}),
       });
     }
     run = [];

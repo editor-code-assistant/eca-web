@@ -133,6 +133,20 @@ export interface StoredMessage {
   role: StoredMessageRole;
   content: unknown;
   contentId?: string;
+  /** Set on the message that ended a turn: what the turn used. */
+  turnUsage?: StoredTurnUsage;
+}
+
+/**
+ * What a turn used, kept by ECA on the last message of the turn, as it
+ * told it live in the `turnUsage` content that ended the turn.
+ */
+export interface StoredTurnUsage {
+  model?: string;
+  totalTimeMs?: number;
+  outputTokens: number;
+  inputTokens: number;
+  cost?: string;
 }
 
 export interface StoredTextContent {
