@@ -145,6 +145,8 @@ export interface StoredTurnUsage {
   model?: string;
   totalTimeMs?: number;
   outputTokens: number;
+  /** How fast the model generated during the turn, kept from ECA 0.175.1 on. */
+  outputTps?: number;
   inputTokens: number;
   cost?: string;
 }

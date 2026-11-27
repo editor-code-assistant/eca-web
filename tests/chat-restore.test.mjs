@@ -364,7 +364,7 @@ test('consecutive reasons restore as one reasoning block', () => {
   ]);
 });
 
-const turnUsage = { model: 'mock/m1', totalTimeMs: 9800, outputTokens: 412, inputTokens: 45200, cost: '0.03' };
+const turnUsage = { model: 'mock/m1', totalTimeMs: 9800, outputTokens: 412, outputTps: 87, inputTokens: 45200, cost: '0.03' };
 
 test('what a turn used restores after the message ending it, as ECA replays it', () => {
   const call = { id: 'tc', name: 'read_file', arguments: {} };
@@ -418,6 +418,8 @@ test('a reopened chat shows what its turns used under their answers, not in its 
   const shown = () => state.chats['chat-1'].messages.map(m => m.type);
   assert.deepEqual(shown(), ['text', 'toolCall', 'text', 'turnUsage']);
   assert.deepEqual(state.chats['chat-1'].messages[3], { type: 'turnUsage', ...turnUsage });
+  // Its speed shows under its answer, so the subheader leaves it out.
+  assert.equal(state.chats['chat-1'].turnUsageShown, true);
   const live = (data) => bridge.handleSSEEvent(event('chat:content-received', data));
   // A subagent's turn ends: nothing for it, in its call or in the chat.
   live({ chatId: 'sub-1', parentChatId: 'chat-1', role: 'system', content: { type: 'turnUsage', ...turnUsage } });
